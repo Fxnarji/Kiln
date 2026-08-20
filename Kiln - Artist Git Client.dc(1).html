@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #0B0C0D; font-family: 'Space Grotesk', sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: #E2703A; text-decoration: none; }
+  a:hover { color: #F08A55; }
+  * { box-sizing: border-box; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #33383E; border-radius: 6px; border: 3px solid transparent; background-clip: content-box; }
+</style>
+</helmet>
+
+<div style="padding: 28px 28px 56px; display: flex; flex-direction: column; gap: 18px; align-items: flex-start;">
+
+  <div style="display: flex; align-items: baseline; gap: 14px; color: #8B9099; font-size: 13px; letter-spacing: 0.02em;">
+    <span style="font-size: 15px; font-weight: 600; color: #E8E6E3;">Kiln</span>
+    <span>Desktop client · 1440×900</span>
+  </div>
+
+  <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+    <sc-for list="{{ screens }}" as="s" hint-placeholder-count="7">
+      <button onClick="{{ s.go }}" style="font-family: 'Space Grotesk', sans-serif; font-size: 12.5px; font-weight: 500; letter-spacing: 0.01em; padding: 8px 13px; border-radius: 7px; cursor: pointer; border: 1px solid {{ s.border }}; background: {{ s.bg }}; color: {{ s.fg }};" style-hover="border-color: #4A5058;">{{ s.label }}</button>
+    </sc-for>
+  </div>
+
+  <div style="position: relative; width: 1440px; height: 900px; border-radius: 12px; overflow: hidden; background: #131416; border: 1px solid #2E3238; box-shadow: 0 30px 80px -20px rgba(0,0,0,0.8); display: flex; flex-direction: column;">
+
+    <!-- title bar -->
+    <div style="height: 46px; flex: none; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #191B1E; border-bottom: 1px solid #2A2E33;">
+      <div style="display: flex; gap: 8px;">
+        <div style="width: 11px; height: 11px; border-radius: 50%; background: #3A3F45;"></div>
+        <div style="width: 11px; height: 11px; border-radius: 50%; background: #3A3F45;"></div>
+        <div style="width: 11px; height: 11px; border-radius: 50%; background: #3A3F45;"></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 13px; font-weight: 600; color: #E8E6E3;">emberfall-source</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #A9AFB6; background: #23262A; border: 1px solid #32363C; padding: 3px 8px; border-radius: 5px;">art/main</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6F757C;">#4a91c7e</span>
+      </div>
+      <div style="flex: 1;"></div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 11.5px; color: #7C828A;">3 incoming · 4 to push</span>
+        <button onClick="{{ goSync }}" style="font-family: inherit; font-size: 12px; font-weight: 500; color: #D7D4D0; background: #24272C; border: 1px solid #363A41; border-radius: 6px; padding: 6px 12px; cursor: pointer;" style-hover="background: #2C3036;">Pull</button>
+        <button onClick="{{ goSync }}" style="font-family: inherit; font-size: 12px; font-weight: 600; color: #16110D; background: #E2703A; border: 1px solid #E2703A; border-radius: 6px; padding: 6px 12px; cursor: pointer;" style-hover="background: #F08A55;">Push 4</button>
+      </div>
+    </div>
+
+    <div style="flex: 1; display: flex; min-height: 0;">
+
+      <!-- sidebar -->
+      <div style="width: 268px; flex: none; background: #17191C; border-right: 1px solid #2A2E33; display: flex; flex-direction: column; padding: 14px 10px 10px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 8px;">
+          <span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #62686F;">Pinned folders</span>
+          <button onClick="{{ goPin }}" style="font-family: inherit; font-size: 15px; line-height: 1; color: #7C828A; background: transparent; border: none; cursor: pointer; padding: 0 2px;" style-hover="color: #E2703A;">+</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+          <sc-for list="{{ pins }}" as="p" hint-placeholder-count="4">
+            <button onClick="{{ p.go }}" style="width: 100%; display: flex; align-items: center; gap: 9px; text-align: left; font-family: inherit; background: {{ p.bg }}; border: none; border-radius: 7px; padding: 7px 9px; cursor: pointer;" style-hover="background: #22252A;">
+              <span style="width: 15px; height: 15px; border-radius: 4px; flex: none; background: {{ p.tint }};"></span>
+              <span style="flex: 1; min-width: 0;">
+                <span style="display: block; font-size: 13px; font-weight: 500; color: {{ p.fg }};">{{ p.label }}</span>
+                <span style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #62686F; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ p.path }}</span>
+              </span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 500; color: #9AA0A7; background: #24272C; border: 1px solid #32363C; padding: 2px 5px; border-radius: 4px; flex: none;">{{ p.depth }}</span>
+            </button>
+          </sc-for>
+        </div>
+
+        <div style="height: 1px; background: #2A2E33; margin: 12px 8px;"></div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 8px 8px;">
+          <span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #62686F;">Working tree</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4E545B;">emberfall-source</span>
+        </div>
+        <div style="flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px 8px;">
+          <sc-for list="{{ tree }}" as="t" hint-placeholder-count="12">
+            <div style="display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px {{ t.indent }}; border-radius: 6px; cursor: pointer; background: {{ t.bg }};" style-hover="background: #22252A;" onClick="{{ t.toggle }}" onDoubleClick="{{ t.dbl }}">
+              <span style="width: 10px; flex: none; font-size: 9px; color: #62686F; text-align: center;">{{ t.caret }}</span>
+              <span style="width: 12px; height: 12px; border-radius: 3px; flex: none; background: {{ t.tint }};"></span>
+              <span style="flex: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: {{ t.fg }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ t.name }}</span>
+              <sc-if value="{{ t.isPinned }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em; color: #E2703A; flex: none;">PINNED {{ t.pinDepth }}</span>
+              </sc-if>
+              <sc-if value="{{ t.canPin }}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{ t.pin }}" style="font-family: inherit; font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em; color: #7C828A; background: transparent; border: 1px solid #363A41; border-radius: 4px; padding: 1px 5px; cursor: pointer; flex: none;" style-hover="color: #E2703A; border-color: #56381F;">PIN</button>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="height: 1px; background: #2A2E33; margin: 8px 8px 12px;"></div>
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #62686F; padding: 6px 8px 8px;">Repository</div>
+        <button onClick="{{ goSync }}" style="width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font-family: inherit; font-size: 13px; font-weight: 500; color: #B8BCC2; background: transparent; border: none; border-radius: 7px; padding: 8px 9px; cursor: pointer;" style-hover="background: #22252A;">
+          <span style="flex: 1;">Changes</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #E2703A;">4</span>
+        </button>
+        <button onClick="{{ goConflict }}" style="width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font-family: inherit; font-size: 13px; font-weight: 500; color: #B8BCC2; background: transparent; border: none; border-radius: 7px; padding: 8px 9px; cursor: pointer;" style-hover="background: #22252A;">
+          <span style="flex: 1;">My locks</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #62686F;">2</span>
+        </button>
+        <button onClick="{{ goClone }}" style="width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font-family: inherit; font-size: 13px; font-weight: 500; color: #B8BCC2; background: transparent; border: none; border-radius: 7px; padding: 8px 9px; cursor: pointer;" style-hover="background: #22252A;">
+          <span style="flex: 1;">Clone a project</span>
+        </button>
+
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #62686F; padding: 4px 9px;">mira@emberfall.dev</div>
+      </div>
+
+      <!-- main -->
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;">
+
+        <!-- HOME -->
+        <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+          <div style="flex: 1; overflow-y: auto; padding: 30px 34px 40px;">
+            <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 26px;">
+              <div>
+                <div style="font-size: 24px; font-weight: 600; color: #F0EEEB; letter-spacing: -0.01em;">emberfall-source</div>
+                <div style="font-size: 13.5px; color: #7C828A; margin-top: 5px;">Pulled 2 hours ago · 3 behind art/main</div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button onClick="{{ goSync }}" style="font-family: inherit; font-size: 12.5px; font-weight: 500; color: #D7D4D0; background: #24272C; border: 1px solid #363A41; border-radius: 7px; padding: 9px 14px; cursor: pointer;" style-hover="background: #2C3036;">Pull latest</button>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 34px;">
+              <sc-for list="{{ stats }}" as="st" hint-placeholder-count="3">
+                <div style="background: #1B1D20; border: 1px solid #2A2E33; border-radius: 10px; padding: 15px 17px;">
+                  <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F;">{{ st.label }}</div>
+                  <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 9px;">
+                    <span style="font-size: 26px; font-weight: 600; color: {{ st.tint }}; letter-spacing: -0.02em;">{{ st.value }}</span>
+                    <span style="font-size: 12.5px; color: #7C828A;">{{ st.note }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+              <div style="font-size: 15px; font-weight: 600; color: #E8E6E3;">Recently opened</div>
+              <span style="font-size: 12px; color: #62686F;">Working copy · /Volumes/emberfall/source</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 34px;">
+              <sc-for list="{{ recent }}" as="f" hint-placeholder-count="4">
+                <button onClick="{{ f.open }}" onDoubleClick="{{ f.dbl }}" style="text-align: left; font-family: inherit; padding: 0; cursor: pointer; background: #1B1D20; border: 1px solid #2A2E33; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;" style-hover="border-color: #454B52;">
+                  <div style="height: 132px; background: {{ f.tint }}; position: relative; display: flex; align-items: flex-end; padding: 10px;">
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.82); background: rgba(0,0,0,0.42); padding: 3px 7px; border-radius: 4px;">{{ f.ext }}</span>
+                    <span style="position: absolute; top: 10px; right: 10px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; padding: 3px 7px; border-radius: 4px; color: {{ f.lockFg }}; background: {{ f.lockBg }};">{{ f.lockLabel }}</span>
+                  </div>
+                  <div style="padding: 11px 12px 13px;">
+                    <div style="font-size: 13px; font-weight: 500; color: #E8E6E3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ f.name }}</div>
+                    <div style="font-size: 11.5px; color: #6F757C; margin-top: 3px;">{{ f.meta }}</div>
+                  </div>
+                </button>
+              </sc-for>
+            </div>
+
+            <div style="font-size: 15px; font-weight: 600; color: #E8E6E3; margin-bottom: 14px;">Recent commits</div>
+            <div style="background: #1B1D20; border: 1px solid #2A2E33; border-radius: 10px; overflow: hidden;">
+              <sc-for list="{{ activity }}" as="a" hint-placeholder-count="4">
+                <div style="display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid #23262A;">
+                  <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #8B9099; width: 62px; flex: none;">{{ a.hash }}</div>
+                  <div style="flex: 1; min-width: 0; font-size: 13px; color: #C3C7CC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ a.text }}</div>
+                  <div style="font-size: 12px; color: #62686F; width: 80px; flex: none;">{{ a.who }}</div>
+                  <div style="font-size: 11.5px; color: #62686F; width: 78px; text-align: right; flex: none;">{{ a.time }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- BROWSE -->
+        <sc-if value="{{ isBrowse }}">
+          <div style="flex: none; padding: 24px 34px 16px; border-bottom: 1px solid #23262A;">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #62686F; font-family: 'IBM Plex Mono', monospace;">
+              <span style="color: #E2703A;">pinned</span><span>·</span><span style="color: #A9AFB6;">/chars</span><span>·</span><span>depth 2</span>
+            </div>
+            <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-top: 8px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <div style="font-size: 22px; font-weight: 600; color: #F0EEEB;">Characters</div>
+                  <button onClick="{{ goPin }}" style="font-family: inherit; font-size: 11px; font-weight: 500; color: #9AA0A7; background: #24272C; border: 1px solid #363A41; border-radius: 5px; padding: 4px 9px; cursor: pointer;" style-hover="background: #2C3036;">Edit pin</button>
+                </div>
+                <div style="font-size: 12.5px; color: #7C828A; margin-top: 4px;">48 files · 14 subfolders · 6 locked · 12.4 GB</div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <sc-for list="{{ filters }}" as="fl" hint-placeholder-count="3">
+                  <span style="font-size: 11.5px; font-weight: 500; color: {{ fl.fg }}; background: {{ fl.bg }}; border: 1px solid {{ fl.border }}; padding: 6px 11px; border-radius: 20px;">{{ fl.label }}</span>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+          <div style="flex: 1; overflow-y: auto; padding: 22px 34px 40px;">
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+              <sc-for list="{{ assets }}" as="f" hint-placeholder-count="12">
+                <button onClick="{{ f.open }}" onDoubleClick="{{ f.dbl }}" style="text-align: left; font-family: inherit; padding: 0; cursor: pointer; background: #1B1D20; border: 1px solid #2A2E33; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;" style-hover="border-color: #454B52;">
+                  <div style="height: 158px; background: {{ f.tint }}; position: relative; display: flex; align-items: flex-end; padding: 10px;">
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.82); background: rgba(0,0,0,0.42); padding: 3px 7px; border-radius: 4px;">{{ f.ext }}</span>
+                    <span style="position: absolute; top: 10px; right: 10px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; padding: 3px 7px; border-radius: 4px; color: {{ f.lockFg }}; background: {{ f.lockBg }};">{{ f.lockLabel }}</span>
+                  </div>
+                  <div style="padding: 12px 13px 14px;">
+                    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #62686F; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ f.rel }}</div>
+                    <div style="font-size: 13.5px; font-weight: 500; color: #E8E6E3; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ f.name }}</div>
+                    <div style="font-size: 11.5px; color: #6F757C; margin-top: 4px;">{{ f.meta }}</div>
+                  </div>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- DETAIL -->
+        <sc-if value="{{ isDetail }}">
+          <div style="flex: 1; display: flex; min-height: 0;">
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+              <sc-if value="{{ showLockBanner }}">
+                <div style="flex: none; display: flex; align-items: center; gap: 13px; padding: 12px 22px; background: #2A1F14; border-bottom: 1px solid #56381F;">
+                  <span style="width: 8px; height: 8px; border-radius: 50%; background: #E2703A; flex: none;"></span>
+                  <div style="flex: 1; font-size: 13px; color: #EBD9C9;">Locked <b style="color: #FFF;">char.blend</b> · 09:12 today</div>
+                  <button onClick="{{ dismissBanner }}" style="font-family: inherit; font-size: 12px; font-weight: 500; color: #EBD9C9; background: transparent; border: 1px solid #6B4527; border-radius: 6px; padding: 6px 11px; cursor: pointer;" style-hover="background: #3A2A1B;">Release lock</button>
+                  <button onClick="{{ dismissBanner }}" style="font-family: inherit; font-size: 12px; color: #A98D74; background: transparent; border: none; cursor: pointer; padding: 6px;">Dismiss</button>
+                </div>
+              </sc-if>
+              <div style="flex: none; padding: 22px 26px 18px;">
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #62686F; font-family: 'IBM Plex Mono', monospace;">
+                  <span>chars</span><span>/</span><span>Character01</span><span>/</span><span style="color: #A9AFB6;">src</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px; margin-top: 9px;">
+                  <div style="font-size: 21px; font-weight: 600; color: #F0EEEB;">char.blend</div>
+                  <sc-if value="{{ isLocked }}" hint-placeholder-val="{{ true }}">
+                    <span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: #16110D; background: #E2703A; padding: 4px 8px; border-radius: 5px;">LOCKED BY YOU</span>
+                  </sc-if>
+                  <sc-if value="{{ isUnlocked }}" hint-placeholder-val="{{ false }}">
+                    <span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: #8B9099; border: 1px solid #363A41; padding: 3px 8px; border-radius: 5px;">NOT LOCKED</span>
+                  </sc-if>
+                </div>
+              </div>
+              <div style="flex: 1; margin: 0 26px 26px; border-radius: 10px; border: 1px solid #2A2E33; background: linear-gradient(150deg, #3B3A52, #24242F 55%, #1C1D22); min-height: 0;"></div>
+            </div>
+
+            <div style="width: 380px; flex: none; border-left: 1px solid #2A2E33; background: #17191C; display: flex; flex-direction: column; min-height: 0;">
+              <div style="flex: none; padding: 20px 20px 16px; border-bottom: 1px solid #23262A; display: flex; flex-direction: column; gap: 10px;">
+                <button style="font-family: inherit; font-size: 13px; font-weight: 600; color: #16110D; background: #E2703A; border: none; border-radius: 8px; padding: 11px; cursor: pointer;" style-hover="background: #F08A55;">Open in Blender</button>
+                <div style="display: flex; gap: 8px;">
+                  <button onClick="{{ goSync }}" style="flex: 1; font-family: inherit; font-size: 12.5px; font-weight: 500; color: #D7D4D0; background: #24272C; border: 1px solid #363A41; border-radius: 8px; padding: 9px; cursor: pointer;" style-hover="background: #2C3036;">Commit</button>
+                  <button onClick="{{ toggleLock }}" style="flex: 1; font-family: inherit; font-size: 12.5px; font-weight: 500; color: #D7D4D0; background: #24272C; border: 1px solid #363A41; border-radius: 8px; padding: 9px; cursor: pointer;" style-hover="background: #2C3036;">{{ lockAction }}</button>
+                  <button style="flex: none; font-family: inherit; font-size: 12.5px; font-weight: 500; color: #C4574E; background: transparent; border: 1px solid #4A2E2B; border-radius: 8px; padding: 9px 12px; cursor: pointer;" style-hover="background: #2A1B1A;">Discard</button>
+                </div>
+              </div>
+              <div style="flex: 1; overflow-y: auto; padding: 16px 20px 26px; min-height: 0;">
+                <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F; margin-bottom: 14px;">Version history</div>
+                <sc-for list="{{ history }}" as="h" hint-placeholder-count="5">
+                  <div style="display: flex; gap: 12px;">
+                    <div style="display: flex; flex-direction: column; align-items: center; width: 12px; flex: none;">
+                      <span style="width: 8px; height: 8px; border-radius: 50%; background: {{ h.dot }}; margin-top: 5px; flex: none;"></span>
+                      <span style="flex: 1; width: 1px; background: #2E3238;"></span>
+                    </div>
+                    <div style="flex: 1; min-width: 0; padding-bottom: 18px;">
+                      <div style="font-size: 12.5px; color: #DDD9D5; line-height: 1.45;">{{ h.msg }}</div>
+                      <div style="display: flex; gap: 9px; align-items: center; margin-top: 5px; font-size: 11px; color: #62686F;">
+                        <span style="font-family: 'IBM Plex Mono', monospace; color: #8B9099;">{{ h.hash }}</span>
+                        <span>{{ h.who }}</span>
+                        <span>·</span>
+                        <span>{{ h.when }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- SYNC -->
+        <sc-if value="{{ isSync }}">
+          <div style="flex: 1; overflow-y: auto; padding: 30px 34px 40px;">
+            <div style="font-size: 22px; font-weight: 600; color: #F0EEEB;">Changes</div>
+            <div style="font-size: 12.5px; color: #7C828A; margin-top: 5px;">art/main · 3 behind · 4 staged</div>
+
+            <div style="display: flex; gap: 14px; margin: 22px 0 26px;">
+              <div style="flex: 1; background: #1B1D20; border: 1px solid #2A2E33; border-radius: 10px; padding: 16px 18px;">
+                <div style="font-size: 13px; font-weight: 600; color: #E8E6E3;">Incoming — 3 commits</div>
+                <div style="font-size: 12px; color: #7C828A; margin-top: 4px;">None of your locks affected</div>
+                <button style="margin-top: 13px; font-family: inherit; font-size: 12.5px; font-weight: 500; color: #D7D4D0; background: #24272C; border: 1px solid #363A41; border-radius: 7px; padding: 9px 14px; cursor: pointer;" style-hover="background: #2C3036;">Pull now</button>
+              </div>
+              <div style="flex: 1; background: #1B1D20; border: 1px solid #56381F; border-radius: 10px; padding: 16px 18px;">
+                <div style="font-size: 13px; font-weight: 600; color: #E8E6E3;">Outgoing — 4 files</div>
+                <div style="font-size: 12px; color: #7C828A; margin-top: 4px;">2 locks released on push</div>
+                <button style="margin-top: 13px; font-family: inherit; font-size: 12.5px; font-weight: 600; color: #16110D; background: #E2703A; border: none; border-radius: 7px; padding: 9px 14px; cursor: pointer;" style-hover="background: #F08A55;">Commit &amp; push</button>
+              </div>
+            </div>
+
+            <div style="background: #1B1D20; border: 1px solid #2A2E33; border-radius: 10px; overflow: hidden;">
+              <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #23262A; background: #1E2125; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F;">
+                <span style="width: 62px;">State</span>
+                <span style="flex: 1;">File</span>
+                <span style="width: 90px;">Size</span>
+                <span style="width: 120px;">Lock</span>
+              </div>
+              <sc-for list="{{ changes }}" as="c" hint-placeholder-count="5">
+                <div style="display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-bottom: 1px solid #23262A;">
+                  <span style="width: 62px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: {{ c.stateFg }};">{{ c.state }}</span>
+                  <span style="flex: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #DDD9D5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ c.path }}</span>
+                  <span style="width: 90px; font-size: 12px; color: #7C828A;">{{ c.size }}</span>
+                  <span style="width: 120px; font-size: 12px; color: {{ c.lockFg }};">{{ c.lock }}</span>
+                </div>
+              </sc-for>
+              <div style="padding: 15px 16px; display: flex; gap: 12px; align-items: center;">
+                <input placeholder="Commit message — what changed?" style="flex: 1; font-family: inherit; font-size: 13px; color: #E8E6E3; background: #131416; border: 1px solid #32363C; border-radius: 7px; padding: 10px 12px; outline: none;">
+                <button style="font-family: inherit; font-size: 12.5px; font-weight: 500; color: #C4574E; background: transparent; border: 1px solid #4A2E2B; border-radius: 7px; padding: 10px 14px; cursor: pointer;" style-hover="background: #2A1B1A;">Discard</button>
+                <button style="font-family: inherit; font-size: 12.5px; font-weight: 600; color: #16110D; background: #E2703A; border: none; border-radius: 7px; padding: 10px 16px; cursor: pointer;" style-hover="background: #F08A55;">Commit 4 files</button>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- CLONE -->
+        <sc-if value="{{ isClone }}">
+          <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px;">
+            <div style="width: 560px;">
+              <div style="font-size: 24px; font-weight: 600; color: #F0EEEB;">Clone a project</div>
+              
+
+              <div style="margin-top: 26px; display: flex; flex-direction: column; gap: 16px;">
+                <div>
+                  <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F; margin-bottom: 7px;">Repository URL</div>
+                  <input value="git@github.com:emberfall/emberfall-source.git" style="width: 100%; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #E8E6E3; background: #1B1D20; border: 1px solid #363A41; border-radius: 8px; padding: 11px 13px; outline: none;">
+                </div>
+                <div>
+                  <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F; margin-bottom: 7px;">Local folder</div>
+                  <div style="display: flex; gap: 8px;">
+                    <input value="/Volumes/emberfall/source" style="flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #E8E6E3; background: #1B1D20; border: 1px solid #363A41; border-radius: 8px; padding: 11px 13px; outline: none;">
+                    <button style="font-family: inherit; font-size: 12.5px; font-weight: 500; color: #D7D4D0; background: #24272C; border: 1px solid #363A41; border-radius: 8px; padding: 0 16px; cursor: pointer;" style-hover="background: #2C3036;">Browse</button>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F; margin-bottom: 7px;">Which folders do you need?</div>
+                  <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <sc-for list="{{ cloneFolders }}" as="cf" hint-placeholder-count="4">
+                      <div style="display: flex; align-items: center; gap: 12px; background: #1B1D20; border: 1px solid {{ cf.border }}; border-radius: 8px; padding: 11px 13px;">
+                        <span style="width: 15px; height: 15px; border-radius: 4px; flex: none; background: {{ cf.box }}; border: 1px solid {{ cf.boxBorder }};"></span>
+                        <span style="flex: 1; font-size: 13px; font-weight: 500; color: #DDD9D5;">{{ cf.label }}</span>
+                        <span style="font-size: 12px; color: #7C828A;">{{ cf.size }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="font-size: 11.5px; color: #62686F; margin-top: 9px;">Unchecked folders stay as LFS pointers.</div>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 14px; margin-top: 26px;">
+                <button onClick="{{ goHome }}" style="font-family: inherit; font-size: 13px; font-weight: 600; color: #16110D; background: #E2703A; border: none; border-radius: 8px; padding: 12px 20px; cursor: pointer;" style-hover="background: #F08A55;">Clone 34.6 GB</button>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- CONFLICT -->
+        <sc-if value="{{ isConflict }}">
+          <div style="flex: 1; position: relative; overflow: hidden;">
+            <div style="position: absolute; inset: 0; padding: 22px 34px; opacity: 0.35;">
+              <div style="font-size: 22px; font-weight: 600; color: #F0EEEB;">Props <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 400; color: #62686F;">/props · depth 3</span></div>
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 22px;">
+                <sc-for list="{{ assets }}" as="f" hint-placeholder-count="8">
+                  <div style="background: #1B1D20; border: 1px solid #2A2E33; border-radius: 10px; overflow: hidden;">
+                    <div style="height: 130px; background: {{ f.tint }};"></div>
+                    <div style="padding: 11px 12px 13px; font-size: 13px; color: #E8E6E3;">{{ f.name }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="position: absolute; inset: 0; background: rgba(8,9,10,0.72); display: flex; align-items: center; justify-content: center; padding: 40px;">
+              <div style="width: 520px; background: #1B1D20; border: 1px solid #3A3F45; border-radius: 14px; box-shadow: 0 24px 60px -12px rgba(0,0,0,0.7); overflow: hidden;">
+                <div style="padding: 24px 26px 20px; border-bottom: 1px solid #2A2E33;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="width: 9px; height: 9px; border-radius: 50%; background: #C4574E;"></span>
+                    <span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #C4574E;">File is locked</span>
+                  </div>
+                  <div style="font-size: 19px; font-weight: 600; color: #F0EEEB; margin-top: 12px;">stone_arch_A.blend is locked by devin@emberfall.dev</div>
+                  <div style="font-size: 13px; color: #8B9099; margin-top: 8px; line-height: 1.55;">Locked 40 minutes ago on <span style="font-family: 'IBM Plex Mono', monospace; color: #C3C7CC;">art/env-pass</span></div>
+                </div>
+                <div style="padding: 18px 26px 22px; display: flex; gap: 10px; justify-content: flex-end;">
+                  <button onClick="{{ goBrowse }}" style="font-family: inherit; font-size: 12.5px; font-weight: 500; color: #A9AFB6; background: transparent; border: none; border-radius: 7px; padding: 10px 14px; cursor: pointer;" style-hover="color: #E8E6E3;">Cancel</button>
+                  <button onClick="{{ goDetail }}" style="font-family: inherit; font-size: 12.5px; font-weight: 500; color: #D7D4D0; background: #24272C; border: 1px solid #363A41; border-radius: 7px; padding: 10px 16px; cursor: pointer;" style-hover="background: #2C3036;">Open read-only</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+      </div>
+    </div>
+
+    <!-- CONTEXT MENU -->
+    <sc-if value="{{ isMenu }}">
+      <div onClick="{{ goBrowse }}" style="position: absolute; inset: 0; background: rgba(8,9,10,0.25);">
+        <div style="position: absolute; left: 604px; top: 322px; width: 234px; background: #1E2125; border: 1px solid #3A3F45; border-radius: 9px; box-shadow: 0 18px 44px -10px rgba(0,0,0,0.75); padding: 5px;">
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #62686F; padding: 7px 10px 8px; border-bottom: 1px solid #2A2E33; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Character01/src/char_face.blend</div>
+          <sc-for list="{{ menuItems }}" as="mi" hint-placeholder-count="8">
+            <div style="display: flex; align-items: center; gap: 10px; padding: {{ mi.pad }}; border-top: {{ mi.rule }}; border-radius: 6px; cursor: pointer; font-size: 12.5px; color: {{ mi.fg }};" style-hover="background: #2A2E33;">
+              <span style="flex: 1;">{{ mi.label }}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5A6068;">{{ mi.hint }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="position: absolute; left: 842px; top: 348px; width: 186px; background: #1E2125; border: 1px solid #3A3F45; border-radius: 9px; box-shadow: 0 18px 44px -10px rgba(0,0,0,0.75); padding: 5px;">
+          <sc-for list="{{ openWith }}" as="ow" hint-placeholder-count="4">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: {{ ow.rule }}; border-radius: 6px; cursor: pointer; font-size: 12.5px; color: {{ ow.fg }};" style-hover="background: #2A2E33;">
+              <span style="flex: 1;">{{ ow.label }}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5A6068;">{{ ow.hint }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- PIN FOLDER -->
+    <sc-if value="{{ isPin }}">
+      <div style="position: absolute; inset: 0; background: rgba(8,9,10,0.72); display: flex; align-items: center; justify-content: center; padding: 40px;">
+        <div style="width: 720px; background: #1B1D20; border: 1px solid #3A3F45; border-radius: 14px; box-shadow: 0 24px 60px -12px rgba(0,0,0,0.7); overflow: hidden;">
+          <div style="padding: 22px 26px 18px; border-bottom: 1px solid #2A2E33;">
+            <div style="font-size: 18px; font-weight: 600; color: #F0EEEB;">Pin a folder</div>
+            
+          </div>
+
+          <div style="display: flex; min-height: 300px;">
+            <div style="width: 300px; flex: none; border-right: 1px solid #2A2E33; padding: 18px 0 18px 0; display: flex; flex-direction: column;">
+              
+              <div style="flex: 1; overflow-y: auto; padding: 0 12px;">
+                <sc-for list="{{ pickTree }}" as="t" hint-placeholder-count="8">
+                  <div onClick="{{ t.select }}" style="display: flex; align-items: center; gap: 7px; padding: 5px 8px 5px {{ t.indent }}; border-radius: 6px; cursor: pointer; background: {{ t.bg }};" style-hover="background: #22252A;">
+                    <span style="width: 12px; height: 12px; border-radius: 3px; flex: none; background: {{ t.tint }};"></span>
+                    <span style="flex: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: {{ t.fg }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ t.name }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="flex: 1; min-width: 0; padding: 18px 24px 20px;">
+              <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F;">Path</div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #E8E6E3; background: #131416; border: 1px solid #32363C; border-radius: 7px; padding: 10px 12px; margin-top: 7px;">{{ pinPath }}</div>
+
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 18px;">
+                <span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F;">Recursion depth</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #9AA0A7;">{{ pinDepthLabel }}</span>
+              </div>
+              <div style="display: flex; gap: 6px; margin-top: 9px;">
+                <sc-for list="{{ depthOptions }}" as="d" hint-placeholder-count="5">
+                  <button onClick="{{ d.pick }}" style="flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; font-weight: 500; color: {{ d.fg }}; background: {{ d.bg }}; border: 1px solid {{ d.border }}; border-radius: 7px; padding: 9px 0; cursor: pointer;" style-hover="border-color: #4A5058;">{{ d.label }}</button>
+                </sc-for>
+              </div>
+
+              <div style="margin-top: 18px; background: #17191C; border: 1px solid #2A2E33; border-radius: 9px; padding: 14px 15px;">
+                <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #62686F;">Matches</div>
+                <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 11px;">
+                  <sc-for list="{{ pinPreview }}" as="pv" hint-placeholder-count="4">
+                    <div style="display: flex; align-items: center; gap: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;">
+                      <span style="width: 42px; flex: none; font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em; color: {{ pv.tagFg }};">{{ pv.tag }}</span>
+                      <span style="flex: 1; min-width: 0; color: {{ pv.fg }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ pv.path }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="font-size: 11.5px; color: #7C828A; margin-top: 12px; line-height: 1.5;">{{ pinSummary }}</div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 16px; margin-top: 18px;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9AA0A7; cursor: pointer;">
+                  <span style="width: 14px; height: 14px; border-radius: 4px; background: #E2703A; border: 1px solid #E2703A; flex: none;"></span>
+                  Tracked files only
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9AA0A7; cursor: pointer;">
+                  <span style="width: 14px; height: 14px; border-radius: 4px; background: #131416; border: 1px solid #3A3F45; flex: none;"></span>
+                  Show empty folders
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding: 16px 26px; border-top: 1px solid #2A2E33; display: flex; align-items: center; gap: 10px; justify-content: flex-end; background: #1E2125;">
+            <button onClick="{{ goBrowse }}" style="font-family: inherit; font-size: 12.5px; font-weight: 500; color: #A9AFB6; background: transparent; border: none; padding: 10px 14px; cursor: pointer;" style-hover="color: #E8E6E3;">Cancel</button>
+            <button onClick="{{ goBrowse }}" style="font-family: inherit; font-size: 12.5px; font-weight: 600; color: #16110D; background: #E2703A; border: none; border-radius: 7px; padding: 10px 18px; cursor: pointer;" style-hover="background: #F08A55;">Pin {{ pinPath }}</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- LOCK TOAST (auto-lock confirmation) -->
+    <sc-if value="{{ isLock }}">
+      <div style="position: absolute; inset: 0; background: rgba(8,9,10,0.55); display: flex; align-items: flex-end; justify-content: center; padding: 0 0 34px;">
+        <div style="width: 620px; background: #1E2125; border: 1px solid #56381F; border-radius: 12px; box-shadow: 0 20px 50px -10px rgba(0,0,0,0.7); padding: 18px 20px; display: flex; gap: 16px; align-items: flex-start;">
+          <div style="width: 46px; height: 46px; border-radius: 9px; flex: none; background: linear-gradient(140deg, #E2703A, #A2472B); display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 500; color: #17110C;">.blend</div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 14.5px; font-weight: 600; color: #F0EEEB;">Locked — opening in Blender</div>
+            <div style="font-size: 12.5px; color: #9AA0A7; margin-top: 5px; line-height: 1.5;">
+              <span style="font-family: 'IBM Plex Mono', monospace; color: #C3C7CC;">/chars/Character01/src/char.blend</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-top: 13px;">
+              <button onClick="{{ goDetail }}" style="font-family: inherit; font-size: 12.5px; font-weight: 600; color: #16110D; background: #E2703A; border: none; border-radius: 7px; padding: 9px 15px; cursor: pointer;" style-hover="background: #F08A55;">Got it</button>
+              <button onClick="{{ goDetail }}" style="font-family: inherit; font-size: 12.5px; font-weight: 500; color: #D7D4D0; background: #24272C; border: 1px solid #363A41; border-radius: 7px; padding: 9px 15px; cursor: pointer;" style-hover="background: #2C3036;">Open without locking</button>
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #7C828A; cursor: pointer;">
+                <span style="width: 14px; height: 14px; border-radius: 4px; background: #131416; border: 1px solid #3A3F45; flex: none;"></span>
+                Don't ask again for .blend
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+const TINTS = {
+  kael: 'linear-gradient(145deg, #4A4763, #2A2A38)',
+  skin: 'linear-gradient(145deg, #7A5A48, #3A2C26)',
+  rig: 'linear-gradient(145deg, #3D5560, #22303A)',
+  cloth: 'linear-gradient(145deg, #63424E, #322028)',
+  stone: 'linear-gradient(145deg, #56544C, #2C2B27)',
+  env: 'linear-gradient(145deg, #3E5A47, #212E27)',
+  concept: 'linear-gradient(145deg, #6B5C7A, #322B3C)',
+  metal: 'linear-gradient(145deg, #4E5661, #262B31)'
+};
+
+const LOCK = {
+  you: { lockLabel: 'YOU', lockFg: '#16110D', lockBg: '#E2703A' },
+  other: { lockLabel: 'DEVIN', lockFg: '#FFE4E1', lockBg: 'rgba(196,87,78,0.9)' },
+  open: { lockLabel: '', lockFg: 'transparent', lockBg: 'transparent' }
+};
+
+const PINS = [
+  { label: 'Characters', path: '/chars', depth: 2, tint: '#6B6789', dest: 'browse' },
+  { label: 'Props', path: '/props', depth: 3, tint: '#8A7A5C', dest: 'conflict' },
+  { label: 'Environments', path: '/env/kits', depth: 2, tint: '#4E7A5C', dest: 'browse' },
+  { label: 'Concept', path: '/pre/concept', depth: 1, tint: '#5C6B8A', dest: 'browse' }
+];
+
+const PINNED_PATHS = { '/chars': 2, '/props': 3, '/env/kits': 2, '/pre/concept': 1 };
+
+const DIR = '#4E545B';
+const TREE = [
+  { name: 'chars', path: '/chars', open: true, children: [
+    { name: 'Character01', path: '/chars/Character01', open: true, children: [
+      { name: 'src', path: '/chars/Character01/src', open: true, children: [
+        { name: 'char.blend', path: '/chars/Character01/src/char.blend', file: true },
+        { name: 'char_face.blend', path: '/chars/Character01/src/char_face.blend', file: true }
+      ] },
+      { name: 'tex', path: '/chars/Character01/tex', children: [
+        { name: 'char_basecolor.spp', path: '/chars/Character01/tex/char_basecolor.spp', file: true }
+      ] },
+      { name: 'export', path: '/chars/Character01/export', children: [] }
+    ] },
+    { name: 'Character02', path: '/chars/Character02', children: [] },
+    { name: 'NPC_Smith', path: '/chars/NPC_Smith', children: [] }
+  ] },
+  { name: 'props', path: '/props', children: [] },
+  { name: 'env', path: '/env', open: true, children: [
+    { name: 'kits', path: '/env/kits', children: [] },
+    { name: 'lighting', path: '/env/lighting', children: [] }
+  ] },
+  { name: 'pre', path: '/pre', children: [] },
+  { name: '_lib', path: '/_lib', children: [] }
+];
+
+const DEPTH_NOTES = {
+  1: 'top level only',
+  2: '+1 subfolder level',
+  3: '+2 subfolder levels',
+  4: '+3 subfolder levels',
+  5: 'no limit'
+};
+
+class Component extends DCLogic {
+  state = { screen: 'home', banner: true, locked: true, pinPath: '/chars', pinDepth: 2, closed: {} };
+
+  go(screen) { return () => this.setState({ screen, banner: true }); }
+
+  flatten(nodes, level, _p, picker) {
+    let out = [];
+    nodes.forEach(n => {
+      const closed = this.state.closed[n.path];
+      const open = !n.file && (n.open ? !closed : closed === false);
+      if (picker && n.file) return;
+      const pinDepth = PINNED_PATHS[n.path];
+      const selected = picker && this.state.pinPath === n.path;
+      out.push({
+        name: n.file ? n.name : n.name + '/',
+        indent: (10 + level * 15) + 'px',
+        caret: n.file ? '' : (open ? '▾' : '▸'),
+        tint: n.file ? '#2E3238' : (pinDepth ? '#E2703A' : DIR),
+        fg: n.file ? '#9AA0A7' : (pinDepth ? '#E8E6E3' : '#C3C7CC'),
+        bg: selected ? '#2A1F14' : 'transparent',
+        isPinned: !picker && !!pinDepth,
+        pinDepth: pinDepth ? 'd' + pinDepth : '',
+        canPin: !picker && !n.file && !pinDepth && level === 0,
+        toggle: n.file ? (() => this.setState({ screen: 'detail', banner: false, locked: false })) : () => this.setState(st => ({ closed: { ...st.closed, [n.path]: !open ? false : true } })),
+        dbl: n.file ? this.go('lock') : () => {},
+        pin: () => this.setState({ screen: 'pin', pinPath: n.path, pinDepth: 2 }),
+        select: () => this.setState({ pinPath: n.path })
+      });
+      if (open && n.children) out = out.concat(this.flatten(n.children, level + 1, n.path, picker));
+    });
+    return out;
+  }
+
+  preview() {
+    const d = this.state.pinDepth, root = this.state.pinPath;
+    const rows = [
+      { rel: '/notes.txt', depth: 1 },
+      { rel: '/Character01/thumb.png', depth: 2 },
+      { rel: '/Character01/src/char.blend', depth: 3 },
+      { rel: '/Character01/src/wip/char_sculpt.zpr', depth: 4 }
+    ];
+    return rows.map(r => {
+      const inc = d >= 5 || r.depth <= d + 1;
+      return {
+        path: root + r.rel,
+        tag: inc ? 'shown' : 'hidden',
+        tagFg: inc ? '#6FA8A0' : '#5A6068',
+        fg: inc ? '#DDD9D5' : '#5A6068'
+      };
+    });
+  }
+
+  summary() {
+    const d = this.state.pinDepth;
+    const counts = { 1: '3 files', 2: '11 files', 3: '48 files', 4: '96 files', 5: '134 files' };
+    return counts[d] + ' across ' + (d === 1 ? '1 folder' : (d === 2 ? '4 folders' : '14 folders'));
+  }
+
+  renderVals() {
+    const s = this.state.screen;
+    const defs = [
+      ['home', 'Home'], ['browse', 'Pinned folder'], ['menu', 'Right-click menu'], ['pin', 'Pin a folder'], ['lock', 'Lock on double-click'],
+      ['detail', 'File detail'], ['sync', 'Changes / push–pull'], ['conflict', 'Locked by someone else'],
+      ['clone', 'Clone project']
+    ];
+
+    const mk = (id, name, ext, meta, tint, lock, rel) => ({
+      name, ext, meta, rel: rel || '', tint: TINTS[tint], ...LOCK[lock],
+      open: () => this.setState({ screen: 'detail', banner: false, locked: false }),
+      dbl: () => this.setState({ screen: id, banner: true, locked: id === 'lock' })
+    });
+
+    return {
+      screens: defs.map(([id, label]) => ({
+        label, go: this.go(id),
+        bg: s === id ? '#E2703A' : '#1B1D20',
+        fg: s === id ? '#16110D' : '#9AA0A7',
+        border: s === id ? '#E2703A' : '#2A2E33'
+      })),
+      isHome: s === 'home', isBrowse: s === 'browse' || s === 'pin' || s === 'menu', isDetail: s === 'detail' || s === 'lock',
+      isSync: s === 'sync', isClone: s === 'clone', isConflict: s === 'conflict', isLock: s === 'lock',
+      isPin: s === 'pin', goPin: this.go('pin'),
+      isMenu: s === 'menu',
+      menuItems: [
+        { label: 'Open — locks file', hint: 'dbl-click' },
+        { label: 'Open with', hint: '▸' },
+        { label: 'Open read-only', hint: '' },
+        { label: 'Reveal in Finder', hint: '⇧⌘R', rule: '1px solid #2A2E33' },
+        { label: 'Copy path', hint: '⌘C' },
+        { label: 'Copy path with revision', hint: '' },
+        { label: 'Lock', hint: '', rule: '1px solid #2A2E33' },
+        { label: 'History', hint: '' },
+        { label: 'Discard changes', hint: '', rule: '1px solid #2A2E33', fg: '#C4574E' }
+      ].map(m => ({ ...m, pad: '8px 10px', rule: m.rule || 'none', fg: m.fg || '#DDD9D5' })),
+      openWith: [
+        { label: 'Blender 4.2', hint: 'default' },
+        { label: 'Blender 3.6 LTS', hint: '' },
+        { label: 'Text editor', hint: '' },
+        { label: 'Choose app…', hint: '', rule: '1px solid #2A2E33' }
+      ].map(m => ({ ...m, rule: m.rule || 'none', fg: '#DDD9D5' })),
+      showLockBanner: this.state.banner && this.state.locked && s === 'detail',
+      isLocked: this.state.locked, isUnlocked: !this.state.locked,
+      dismissBanner: () => this.setState({ banner: false }),
+      toggleLock: () => this.setState(st => ({ locked: !st.locked, banner: false })),
+      lockAction: this.state.locked ? 'Release lock' : 'Lock',
+      goHome: this.go('home'), goBrowse: this.go('browse'), goDetail: this.go('detail'),
+      goSync: this.go('sync'), goClone: this.go('clone'), goConflict: this.go('conflict'),
+
+      pins: PINS.map(p => {
+        const active = (s === 'browse' && p.label === 'Characters') || (s === 'conflict' && p.label === 'Props');
+        return {
+          label: p.label, path: p.path, depth: 'd' + p.depth, tint: p.tint,
+          go: this.go(p.dest),
+          bg: active ? '#25282D' : 'transparent',
+          fg: active ? '#F0EEEB' : '#B8BCC2'
+        };
+      }),
+
+      tree: this.flatten(TREE, 0, ''),
+      pickTree: this.flatten(TREE, 0, '', true),
+
+      pinPath: this.state.pinPath,
+      pinDepthLabel: DEPTH_NOTES[this.state.pinDepth],
+      depthOptions: [1, 2, 3, 4, 5].map(d => ({
+        label: d === 5 ? '∞' : String(d),
+        pick: () => this.setState({ pinDepth: d }),
+        bg: d === this.state.pinDepth ? '#E2703A' : '#131416',
+        fg: d === this.state.pinDepth ? '#16110D' : '#9AA0A7',
+        border: d === this.state.pinDepth ? '#E2703A' : '#32363C'
+      })),
+      pinPreview: this.preview(),
+      pinSummary: this.summary(),
+
+      stats: [
+        { label: 'Your locks', value: '2', note: '', tint: '#E2703A' },
+        { label: 'Behind main', value: '3', note: 'commits', tint: '#E8E6E3' },
+        { label: 'Uncommitted', value: '4', note: 'files · 1.8 GB', tint: '#E8E6E3' }
+      ],
+
+      recent: [
+        mk('lock', 'char.blend', '.blend', '/chars/Character01/src · 20 min', 'kael', 'you'),
+        mk('lock', 'char_basecolor.spp', '.spp', '/chars/Character01/tex · 1 hour', 'skin', 'you'),
+        mk('conflict', 'stone_arch_A.blend', '.blend', '/env/kits/ruins/src · yesterday', 'stone', 'other'),
+        mk('lock', 'silhouettes_v4.psd', '.psd', '/pre/concept/kael · 2 days', 'concept', 'open')
+      ],
+
+      activity: [
+        { hash: '4a91c7e', text: 'Ruins kit second pass, trim sheets merged', who: 'Devin K.', time: '12 min ago' },
+        { hash: 'b71e04d', text: 'Lantern_A blockout', who: 'Sana L.', time: '38 min ago' },
+        { hash: 'f20b81c', text: 'Kael torso retopo pass', who: 'You', time: '3 hours ago' },
+        { hash: '3c8ab55', text: 'NPC_Smith proportion fixes', who: 'Tomas J.', time: '5 hours ago' }
+      ],
+
+      filters: [
+        { label: 'All files', fg: '#16110D', bg: '#E2703A', border: '#E2703A' },
+        { label: 'Locked', fg: '#B8BCC2', bg: 'transparent', border: '#363A41' }
+      ],
+
+      assets: [
+        mk('lock', 'char.blend', '.blend', 'Modified · 324 MB', 'kael', 'you', 'Character01/src'),
+        mk('lock', 'char_face.blend', '.blend', '118 MB', 'skin', 'you', 'Character01/src'),
+        mk('conflict', 'char_cloth_sim.blend', '.blend', '142 MB', 'cloth', 'other', 'Character01/src'),
+        mk('detail', 'char_rig_master.blend', '.blend', '88 MB', 'rig', 'open', 'Character01/rig'),
+        mk('detail', 'char_basecolor.spp', '.spp', 'Modified · 2.1 GB', 'skin', 'you', 'Character01/tex'),
+        mk('detail', 'char_armor_trim.spp', '.spp', '1.4 GB', 'metal', 'open', 'Character01/tex'),
+        mk('detail', 'silhouettes_v4.psd', '.psd', '412 MB', 'concept', 'open', 'Character01/ref'),
+        mk('conflict', 'smith_body.blend', '.blend', '260 MB', 'stone', 'other', 'NPC_Smith/src'),
+        mk('detail', 'smith_apron.blend', '.blend', '96 MB', 'cloth', 'open', 'NPC_Smith/src'),
+        mk('detail', 'guard_lod.blend', '.blend', '54 MB', 'rig', 'open', 'NPC_Guard/src'),
+        mk('detail', 'crowd_variants.blend', '.blend', '210 MB', 'env', 'open', 'Character02/src'),
+        mk('detail', 'char_blendshapes.blend', '.blend', 'New · 96 MB', 'metal', 'open', 'Character02/src')
+      ],
+
+      history: [
+        { msg: 'Kael torso retopo pass — clean quads on shoulder deform', hash: 'f20b81c', who: 'You', when: '3 hours ago', dot: '#E2703A' },
+        { msg: 'Merge branch art/kael-proportions', hash: '9d3c220', who: 'Tomas J.', when: 'yesterday', dot: '#5A6068' },
+        { msg: 'Raise hip height 4cm per art direction notes', hash: '77af10b', who: 'You', when: '2 days ago', dot: '#5A6068' },
+        { msg: 'Blockout handoff from concept, scale matched to rig', hash: '2be9d41', who: 'Sana L.', when: '5 days ago', dot: '#5A6068' },
+        { msg: 'Initial import from ZBrush decimation', hash: 'a10ff92', who: 'Sana L.', when: 'last week', dot: '#5A6068' }
+      ],
+
+      changes: [
+        { state: 'MOD', stateFg: '#E2703A', path: 'chars/Character01/src/char.blend', size: '324 MB', lock: 'You', lockFg: '#E2703A' },
+        { state: 'MOD', stateFg: '#E2703A', path: 'chars/Character01/tex/char_basecolor.spp', size: '2.1 GB', lock: 'You', lockFg: '#E2703A' },
+        { state: 'NEW', stateFg: '#6FA8A0', path: 'chars/Character02/src/char_blendshapes.blend', size: '96 MB', lock: 'Not locked', lockFg: '#62686F' },
+        { state: 'NEW', stateFg: '#6FA8A0', path: 'pre/concept/kael/silhouettes_v4.psd', size: '412 MB', lock: 'Not locked', lockFg: '#62686F' },
+        { state: 'DEL', stateFg: '#C4574E', path: 'chars/Character01/src/_old/char_v2.blend', size: '—', lock: 'Not locked', lockFg: '#62686F' }
+      ],
+
+      cloneFolders: [
+        { label: 'chars', size: '12.4 GB', border: '#56381F', box: '#E2703A', boxBorder: '#E2703A' },
+        { label: 'pre', size: '16.2 GB', border: '#56381F', box: '#E2703A', boxBorder: '#E2703A' },
+        { label: 'props', size: '8.1 GB', border: '#2A2E33', box: '#131416', boxBorder: '#3A3F45' },
+        { label: 'env', size: '21.7 GB', border: '#2A2E33', box: '#131416', boxBorder: '#3A3F45' }
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>
