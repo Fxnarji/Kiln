@@ -3,3 +3,19 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .kiln/
+
+# PyInstaller output
+build/
+dist/
+*.spec.bak
+
+# Python packaging and coverage
+*.egg-info/
+.coverage
+htmlcov/
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
