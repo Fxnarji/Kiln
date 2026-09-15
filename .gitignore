@@ -10,6 +10,7 @@ __pycache__/
 # PyInstaller output
 build/
 dist/
+kiln/build_info.json
 *.spec.bak
 
 # Python packaging and coverage

@@ -1,0 +1,62 @@
+# Build Kiln on every push to main and every pull request into it.
+#
+# The job tests, builds the one-folder zip and the portable exe, and uploads
+# both together with Kiln-windows.json: the manifest a future in-app update
+# check reads to find, compare, and verify a newer build (see kiln/build_info.py).
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build
+        env:
+          # The run number only ever increases, which is what lets an update
+          # check order builds without parsing version strings.
+          KILN_BUILD_NUMBER: ${{ github.run_number }}
+          KILN_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          KILN_CHANNEL: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
+        run: python scripts/build_release.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kiln-windows-b${{ github.run_number }}
+          path: |
+            dist/Kiln-*.zip
+            dist/Kiln-*.exe
+            dist/Kiln-*.json
+          if-no-files-found: error
+          retention-days: 30

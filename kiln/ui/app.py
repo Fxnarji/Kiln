@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
-from kiln import __version__
+from kiln import build_info
 from kiln.core.repository import Repository
 from kiln.core.settings import load_last_project, log_file_path, save_last_project
 from kiln.errors import KilnError
@@ -79,7 +79,7 @@ def choose_repository(argv: list[str]) -> Path | None:
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv
     configure_logging()
-    logging.info("Kiln %s starting", __version__)
+    logging.info("Kiln %s starting", build_info.load().label)
 
     application = QApplication(argv)
     application.setApplicationName("Kiln")

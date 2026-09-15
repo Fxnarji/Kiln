@@ -9,6 +9,8 @@
 # Kiln does NOT bundle git or git-lfs. It finds them on PATH and refuses to
 # start without them. Bundling them would mean owning their security updates.
 
+import os
+
 from PyInstaller.utils.hooks import collect_submodules
 
 # Qt modules PySide6 offers that Kiln has no use for. Excluding them keeps the
@@ -57,11 +59,18 @@ EXCLUDED_MODULES = [
 # to a placeholder tile, because current Blender compresses .blend files.
 REQUIRED_PACKAGES = ["zstandard"]
 
+# The build stamp scripts/build_release.py writes (see kiln/build_info.py).
+# A bare `pyinstaller kiln.spec` has none, and the result reports itself as a
+# development build.
+BUILD_INFO = (
+    [("kiln/build_info.json", "kiln")] if os.path.isfile("kiln/build_info.json") else []
+)
+
 analysis = Analysis(
     ["run_kiln.py"],
     pathex=["."],
     binaries=[],
-    datas=[("kiln/assets/icons", "kiln/assets/icons")],
+    datas=[("kiln/assets/icons", "kiln/assets/icons")] + BUILD_INFO,
     hiddenimports=collect_submodules("kiln") + REQUIRED_PACKAGES,
     hookspath=[],
     runtime_hooks=[],
