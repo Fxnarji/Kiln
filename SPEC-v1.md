@@ -70,8 +70,8 @@ other stack consideration.
 - Qt Widgets is stable, exhaustively documented, and 20 years old.
 - Subprocess control is a first-class concern in Qt, and this application is
   fundamentally a subprocess driver.
-- Python is also the language of the Blender-side integration (7.5), so the
-  locking logic is shared rather than reimplemented.
+- Python is also the language of the Blender-side integration (7.5), so core
+  logic can be imported there directly if it ever needs to be.
 
 Rejected: any web frontend (Electron/Tauri/pywebview) — adds a language and a
 toolchain the maintainer cannot debug. QML/Qt Quick — prettier, but QML+JS is a
@@ -99,10 +99,10 @@ Four components. The dependency direction is strictly downward.
 kiln/ui/        PySide6. Widgets, layout, event wiring.
                 May not call git. May not touch the filesystem.
 
-kiln/cli/       Thin argparse entry point over core. `kiln lock <path>`,
-                `kiln unlock <path>`, `kiln status`. Exists so the Blender
-                addon and any future integration have a supported way in
-                without importing Qt or reimplementing locking. See 7.5.
+kiln/cli.py     DEPRECATED. A thin argparse entry point over core, kept
+                as a debugging aid only. It is not an integration boundary
+                and gets no further investment: anything it does, git does
+                directly. See 7.5.
 
 kiln/core/      Pure Python. Repo state, lock state, pin/depth logic,
                 the open-for-edit sequence, LFS pointer detection,
@@ -119,7 +119,8 @@ testable headless, from pytest, against fixture repos, with no window on screen.
 This is the single most important maintainability decision in the document: when
 something breaks at the studio it will almost always break in these two layers,
 and you must be able to reproduce it in a terminal in ten seconds. It is also
-what makes the CLI and the Blender addon nearly free.
+what lets the same logic be imported from Blender's Python if it is ever
+needed there.
 
 ### 5.1 Threading
 
@@ -248,20 +249,38 @@ Kiln cannot intercept every way a file gets opened. The policy is:
   calls Kiln. In Blender's case, a bpy addon.
 - **Everything else** — handled manually by the artist. Documented, accepted.
 
-To support the second case without inventing a protocol, `kiln/cli` exists:
+**The addon calls `git lfs lock` directly.** Not Kiln.
 
-```
-kiln lock <path>      # exit 0 on success, non-zero with a message on refusal
-kiln unlock <path>
-kiln status <path>    # JSON on stdout: lock holder, downloaded, modified
-```
+This reverses an earlier decision in this document, and the reasoning is worth
+keeping because it will come up again. The original plan was for the addon to
+shell out to a Kiln CLI, so that "locking logic is never duplicated". Setting
+the two side by side, the logic being protected turns out to be thin:
 
-The addon shells out to this. No IPC server, no daemon, no socket, no port. It
-is the same code path the GUI uses, so it cannot drift, and it is testable from
-a terminal.
+| Step in Kiln's open sequence | What git already guarantees |
+|---|---|
+| Re-query the server before locking | `git lfs lock` is itself authoritative |
+| Refuse if somebody else holds it | `git lfs lock` exits non-zero, saying who |
+| Take the lock | the same command |
+| Make the file writable | git-lfs does this for `lockable` files |
+| Materialise an LFS pointer first | one extra `git lfs pull --include=` |
 
-The addon itself is **out of scope for v1** — but the CLI it will need is in
-scope, because designing it in later means retrofitting the boundary.
+What is left is roughly two conveniences, which is not enough to justify
+shipping a second binary, matching its version to the addon, and putting a
+process boundary in the middle of opening a file.
+
+The deciding argument is 10.6: **Kiln is never required.** An addon that can
+only lock by calling Kiln makes Kiln required for a second workflow, so a
+broken Kiln would also break Blender. Calling git directly keeps that promise.
+
+If the open sequence later grows real policy — settling Q9, say, so that
+opening a file behind the remote is refused — the answer still is not a
+subprocess boundary. It is for the addon to import `kiln.core.editing` from
+Blender's own Python. That module is free of Qt and of OS-specific calls
+precisely so it can be imported anywhere, which also avoids ~400 ms of
+interpreter startup per call. That matters if a scene load locks twenty linked
+files at once.
+
+The addon itself remains **out of scope for v1**.
 
 ## 8. Core data model
 
@@ -566,7 +585,7 @@ just a policy.
 
 | # | Deliverable | Rough |
 |---|---|---|
-| M0 | `kiln/git` + `kiln/core` + `kiln/cli` with pytest fixtures. No UI. Status, log, locks, ahead/behind, pointer detection all correct headless. | 1 wk |
+| M0 | `kiln/git` + `kiln/core` with pytest fixtures. No UI. Status, log, locks, ahead/behind, pointer detection all correct headless. | 1 wk |
 | M1 | Read-only app: window, sidebar tree, browse table, file detail, history. Pins with depth, persisted. Ship this to one artist. | 1.5 wk |
 | M2 | Locking: list, take, release, staleness, the Open sequence (9.4), refused-lock modal, writable-bit handling. Gitea integration confirmed. | 1.5 wk |
 | M3 | Write path: stage, commit, push, pull, changes screen, discard with trash, clean-state guard. | 2 wk |
@@ -583,7 +602,8 @@ and depth are the right idea than any further specification will.
 
 Ordered by how often it will get asked for:
 
-1. The Blender addon (the CLI it needs ships in M0).
+1. The Blender addon. It calls `git lfs lock` directly (7.5); nothing in
+   Kiln has to ship first.
 2. Real thumbnails / preview pane.
 3. Lock request / notification flow ("ask Devin for stone_arch_A").
 4. "Open with" application selection.

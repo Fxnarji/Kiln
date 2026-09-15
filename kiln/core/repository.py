@@ -18,7 +18,12 @@ from pathlib import Path
 from kiln.core import conflicts, editing, permissions, pins, trash
 from kiln.core.models import FileEntry, Lock, Pin, RepoState
 from kiln.core.pointers import is_downloaded
-from kiln.errors import GitCommandError, NotARepositoryError, RepositoryBusyError
+from kiln.errors import (
+    GitCommandError,
+    LocksUnavailableError,
+    NotARepositoryError,
+    RepositoryBusyError,
+)
 from kiln.git import history, locks, merge, remote, status, workdir
 from kiln.git.runner import GitRunner, find_repository_root
 
@@ -31,6 +36,7 @@ class Repository:
     def __init__(self, root: Path):
         self.root = Path(root).resolve()
         self.runner = GitRunner(self.root)
+        self._locking_supported: bool | None = None
         trash.ensure_ignored(self.root)
 
     @classmethod
@@ -112,6 +118,7 @@ class Repository:
 
     def prepare_for_editing(self, repo_relative_path: str) -> editing.PreparedFile:
         self._require_writable_state()
+        self._require_lock_state(repo_relative_path)
         return editing.prepare_for_editing(self.runner, self.root, repo_relative_path)
 
     def prepare_read_only(self, repo_relative_path: str) -> Path:
@@ -119,7 +126,18 @@ class Repository:
 
     def release_lock(self, repo_relative_path: str) -> None:
         self._require_writable_state()
+        self._require_lock_state(repo_relative_path)
         editing.release(self.runner, self.root, repo_relative_path)
+
+    def _require_lock_state(self, repo_relative_path: str) -> None:
+        """Refuse to touch a lock when the server cannot be consulted.
+
+        Without this, a claim would be attempted anyway and fail deep inside
+        git-lfs with a message written for a git user, after the artist had
+        already been told the file was free.
+        """
+        if not self.supports_locking():
+            raise LocksUnavailableError(repo_relative_path)
 
     # -- creation ----------------------------------------------------------
 
@@ -204,8 +222,7 @@ class Repository:
 
     def stage(self, repo_relative_paths: list[str]) -> None:
         self._require_writable_state()
-        for path in repo_relative_paths:
-            workdir.stage_file(self.runner, path)
+        workdir.stage_paths(self.runner, self.root, repo_relative_paths)
 
     def commit(self, message: str, repo_relative_paths: list[str]) -> str:
         """Stage the given files and commit them."""
@@ -222,16 +239,29 @@ class Repository:
         self._require_writable_state()
         backup = trash.backup_file(self.root, repo_relative_path)
 
-        entry_status = {
-            entry.path: entry.status for entry in self.snapshot(include_locks=False).files
-        }
-        if entry_status.get(repo_relative_path) == "new":
-            workdir.remove_untracked_file(self.root / repo_relative_path)
+        entry = self._status_entry(repo_relative_path)
+        if entry is not None and entry.status == "new":
+            # Nothing in HEAD to restore from, so the file has to go. A file
+            # git already knows about — staged with `git add`, which is how a
+            # file Kiln has deleted and restored can end up — also has to leave
+            # the index, or git keeps reporting it as an addition and the row
+            # never disappears from the Changes list.
+            if not entry.untracked:
+                workdir.unstage_file(self.runner, repo_relative_path)
+            workdir.remove_untracked_file(self._safe_path(repo_relative_path))
         else:
             workdir.restore_file(self.runner, repo_relative_path)
 
         log.info("discarded %s (backup: %s)", repo_relative_path, backup)
         return backup
+
+    def _status_entry(self, repo_relative_path: str) -> status.StatusEntry | None:
+        """This path's raw status, or None when git reports it as clean."""
+        report = status.parse_status(self.runner.run(*status.status_argv()).stdout)
+        for entry in report.entries:
+            if entry.path == repo_relative_path:
+                return entry
+        return None
 
     # -- server -------------------------------------------------------------
 
@@ -276,12 +306,35 @@ class Repository:
 
     # -- internals ----------------------------------------------------------
 
+    def supports_locking(self) -> bool:
+        """Can this clone's remote report locks at all?
+
+        Cached: the resolved endpoint is a property of the remote and does not
+        change while Kiln is open, and this is consulted on every refresh.
+        """
+        if self._locking_supported is None:
+            # Resolve the endpoint once: the warning below needs it too, and
+            # asking twice means two subprocesses for one answer.
+            endpoint = locks.locking_endpoint(self.runner)
+            self._locking_supported = locks.endpoint_supports_locking(endpoint)
+            if not self._locking_supported:
+                log.warning(
+                    "remote does not support LFS locking (endpoint: %r); "
+                    "lock state will be reported as unavailable",
+                    endpoint,
+                )
+        return self._locking_supported
+
     def _load_locks(self) -> tuple[dict[str, Lock], bool]:
         """Fetch locks, reporting availability rather than raising.
 
-        The server being unreachable is an ordinary condition here: Kiln shows
-        the offline banner and disables the operations that need it.
+        Returns (locks, available). Being unable to tell is reported as
+        unavailable, never as an empty set of locks — "nobody holds this file"
+        and "there is no way to know" must not look the same (spec 10.2).
         """
+        if not self.supports_locking():
+            return {}, False
+
         try:
             found = locks.list_locks(self.runner)
         except GitCommandError as exc:

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
 
 from kiln.core.thumbnails import read_thumbnail
@@ -25,8 +25,10 @@ from kiln.core.thumbnails import read_thumbnail
 ICON_SIZE = 128
 ICON_DIRECTORY = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
-# Blender stores its preview bottom row first, the way OpenGL hands it over.
-# If previews ever appear upside down, this is the single line to flip.
+# Blender stores its preview bottom row first, the way OpenGL hands it over,
+# so it has to be flipped before display. Confirmed against real .blend files
+# and pinned by test_pixels_are_stored_bottom_row_first — without this every
+# preview in the grid is upside down.
 BLEND_PREVIEW_IS_BOTTOM_UP = True
 
 # A stable colour per extension for the final fallback tile.
@@ -72,7 +74,7 @@ class ThumbnailCache:
 
     def icon_for_folder(self) -> QIcon:
         icon = _asset_icon("folder.png")
-        return QIcon(str(icon)) if icon is not None else QIcon()
+        return QIcon(_square(QPixmap(str(icon)))) if icon is not None else QIcon()
 
     def _cache_key(self, repo_relative_path: str, full_path: Path) -> tuple[str, int, int]:
         """Include size and mtime so an edited file gets a fresh preview."""
@@ -83,13 +85,22 @@ class ThumbnailCache:
             return (repo_relative_path, 0, 0)
 
     def _build_icon(self, full_path: Path, downloaded: bool) -> QIcon:
+        """Pick the best source, then square it.
+
+        Every source has a different natural shape — Blender previews are
+        typically 128x77, the supplied icons are 512 square except .usd which
+        is 456x512, and generated placeholders are 128 square. They all go
+        through _square so the grid receives one consistent size.
+        """
         if downloaded:
             preview = read_thumbnail(full_path)
             if preview is not None:
-                return QIcon(_pixmap_from_preview(preview))
+                return QIcon(_square(_pixmap_from_preview(preview)))
+
         asset = _filetype_icon(full_path.suffix)
         if asset is not None:
-            return QIcon(str(asset))
+            return QIcon(_square(QPixmap(str(asset))))
+
         return QIcon(_placeholder_pixmap(full_path.suffix, downloaded))
 
 
@@ -113,7 +124,46 @@ def _asset_icon(filename: str) -> Path | None:
     return path if path.is_file() else None
 
 
+def _square(pixmap: QPixmap) -> QPixmap:
+    """Fit a pixmap inside a transparent ICON_SIZE square, centred.
+
+    Every icon handed to the grid has to be exactly the same size. The view is
+    told setUniformItemSizes(True), which makes Qt apply the first item's size
+    hint to every item — so one 128x77 Blender preview sitting next to a 128
+    square placeholder clips whichever kind is taller. Letterboxing here means
+    the aspect ratio is preserved and the tile size never varies.
+    """
+    if pixmap.isNull():
+        return pixmap
+
+    scaled = pixmap.scaled(
+        ICON_SIZE, ICON_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation
+    )
+    if scaled.size() == QSize(ICON_SIZE, ICON_SIZE):
+        return scaled
+
+    canvas = QPixmap(ICON_SIZE, ICON_SIZE)
+    canvas.fill(Qt.transparent)
+
+    painter = QPainter(canvas)
+    try:
+        painter.drawPixmap(
+            (ICON_SIZE - scaled.width()) // 2,
+            (ICON_SIZE - scaled.height()) // 2,
+            scaled,
+        )
+    finally:
+        painter.end()
+
+    return canvas
+
+
 def _pixmap_from_preview(preview) -> QPixmap:
+    """The embedded preview as a pixmap, at its own aspect ratio.
+
+    Sizing is left to _square, so there is one place that decides how an icon
+    is fitted to the grid.
+    """
     image = QImage(
         preview.rgba,
         preview.width,
@@ -123,16 +173,9 @@ def _pixmap_from_preview(preview) -> QPixmap:
     ).copy()  # copy: the QImage must not outlive the bytes it was built from
 
     if BLEND_PREVIEW_IS_BOTTOM_UP:
-        image = image.mirrored(False, True)
+        image = image.flipped(Qt.Vertical)
 
-    return QPixmap.fromImage(
-        image.scaled(
-            ICON_SIZE,
-            ICON_SIZE,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-    )
+    return QPixmap.fromImage(image)
 
 
 def _placeholder_pixmap(suffix: str, downloaded: bool) -> QPixmap:

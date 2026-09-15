@@ -16,7 +16,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from kiln.errors import GitCommandError, LockRefusedError, RepositoryBusyError
+from kiln.errors import (
+    AuthenticationError,
+    GitCommandError,
+    LockRefusedError,
+    RepositoryBusyError,
+)
 from kiln.git.runner import GitRunner
 
 
@@ -108,6 +113,8 @@ def _format_history(runner: GitRunner) -> str:
 
 
 def _title_for(error: Exception) -> str:
+    if isinstance(error, AuthenticationError):
+        return "Cannot sign in to the server"
     if isinstance(error, RepositoryBusyError):
         return "Kiln cannot make changes right now"
     if isinstance(error, GitCommandError):
@@ -116,12 +123,16 @@ def _title_for(error: Exception) -> str:
 
 
 def _summary_for(error: Exception) -> str:
+    if isinstance(error, AuthenticationError):
+        return error.advice()
     if isinstance(error, RepositoryBusyError):
         return error.condition
     return str(error).splitlines()[0] if str(error) else error.__class__.__name__
 
 
 def _detail_for(error: Exception) -> str:
+    if isinstance(error, AuthenticationError):
+        return ""  # the advice above is the whole message; git's wording adds noise
     if isinstance(error, GitCommandError):
         return (error.stderr or error.stdout).strip()[:1000]
     return ""

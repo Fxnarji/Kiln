@@ -9,7 +9,7 @@ import pytest
 from kiln.core.models import Pin
 from kiln.core.repository import Repository
 from kiln.errors import RepositoryBusyError
-from tests.conftest import git, write_binary
+from tests.conftest import git, remove_tree, write_binary
 
 
 def test_snapshot_lists_tracked_files(repository: Repository):
@@ -43,6 +43,29 @@ def test_commit_only_includes_selected_files(repository: Repository):
     assert remaining == {"props/crate.blend"}
 
 
+def test_commit_of_a_folder_deleted_in_kiln(repository: Repository):
+    repository.delete_to_trash("chars/hero")
+
+    repository.commit(
+        "Remove hero", ["chars/hero/hero.blend", "chars/hero/tex/hero_color.blend"]
+    )
+
+    assert not repository.snapshot(include_locks=False).changed_files
+    assert "chars/hero" not in git(repository.root, "ls-files")
+
+
+def test_commit_of_a_folder_deleted_outside_kiln(repository: Repository):
+    remove_tree(repository.root / "chars/hero")
+    write_binary(repository.root / "props/crate.blend", "edited crate")
+
+    repository.commit(
+        "Remove hero",
+        ["chars/hero/hero.blend", "chars/hero/tex/hero_color.blend", "props/crate.blend"],
+    )
+
+    assert not repository.snapshot(include_locks=False).changed_files
+
+
 def test_commit_requires_a_message(repository: Repository):
     with pytest.raises(ValueError):
         repository.commit("   ", ["props/crate.blend"])
@@ -67,6 +90,19 @@ def test_discard_of_a_new_file_removes_it_but_keeps_a_copy(repository: Repositor
 
     assert not (repository.root / target).exists()
     assert backup is not None and b"never committed" in backup.read_bytes()
+
+
+def test_discard_of_a_staged_new_file_leaves_nothing_behind(repository: Repository):
+    """A staged addition must leave the index too, or the row never goes away."""
+    target = "props/experiment.blend"
+    write_binary(repository.root / target, "never committed")
+    repository.stage([target])
+
+    repository.discard(target)
+
+    assert not (repository.root / target).exists()
+    changed = {entry.path for entry in repository.snapshot(include_locks=False).changed_files}
+    assert target not in changed
 
 
 def test_kiln_directory_is_excluded_from_git(repository: Repository):

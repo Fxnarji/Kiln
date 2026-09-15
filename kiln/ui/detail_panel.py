@@ -30,6 +30,49 @@ from kiln.ui import theme
 
 HISTORY_COLUMNS = ["When", "Who", "Change"]
 
+# Which rows and buttons a panel offers. Named rather than passed as widgets,
+# so a window can ask for the ones its screen is about without reaching into
+# the panel afterwards. The Locks screen has no use for a Discard button, and
+# the Changes screen none for a lock holder.
+FIELD_NAME = "name"
+FIELD_FOLDER = "folder"
+FIELD_SIZE = "size"
+FIELD_STATE = "state"
+FIELD_LOCK = "lock"
+FIELD_DISK = "disk"
+
+ALL_FIELDS = (
+    FIELD_NAME,
+    FIELD_FOLDER,
+    FIELD_SIZE,
+    FIELD_STATE,
+    FIELD_LOCK,
+    FIELD_DISK,
+)
+
+FIELD_LABELS = {
+    FIELD_NAME: "Name",
+    FIELD_FOLDER: "Folder",
+    FIELD_SIZE: "Size",
+    FIELD_STATE: "State",
+    FIELD_LOCK: "Lock",
+    FIELD_DISK: "On disk",
+}
+
+ACTION_OPEN = "open"
+ACTION_READ_ONLY = "read_only"
+ACTION_LOCK = "lock"
+ACTION_RELEASE = "release"
+ACTION_DISCARD = "discard"
+
+ALL_ACTIONS = (
+    ACTION_OPEN,
+    ACTION_READ_ONLY,
+    ACTION_LOCK,
+    ACTION_RELEASE,
+    ACTION_DISCARD,
+)
+
 
 class DetailPanel(QWidget):
     open_requested = Signal(str)
@@ -38,13 +81,25 @@ class DetailPanel(QWidget):
     release_requested = Signal(str)
     discard_requested = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        fields: tuple[str, ...] = ALL_FIELDS,
+        actions: tuple[str, ...] = ALL_ACTIONS,
+    ):
         super().__init__(parent)
         self._path = ""
+        self._fields = tuple(fields)
+        self._actions = tuple(actions)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_properties())
-        layout.addWidget(self._build_actions())
+        # A panel can ask for no actions at all. The box is still built, so the
+        # rest of this class never has to ask whether the buttons exist, but it
+        # is left out of the layout rather than shown empty.
+        self._actions_box = self._build_actions()
+        if self._actions:
+            layout.addWidget(self._actions_box)
         layout.addWidget(self._build_history(), stretch=1)
 
         self.show_file(None, None)
@@ -52,6 +107,11 @@ class DetailPanel(QWidget):
     # -- construction -------------------------------------------------------
 
     def _build_properties(self) -> QGroupBox:
+        """Every row is built, only the requested ones are shown.
+
+        Keeping the unshown labels alive costs nothing and means show_file does
+        not have to ask which rows this particular panel happens to have.
+        """
         box = QGroupBox("File")
         form = QFormLayout(box)
 
@@ -64,12 +124,16 @@ class DetailPanel(QWidget):
         self.lock_label = QLabel()
         self.disk_label = QLabel()
 
-        form.addRow("Name", self.name_label)
-        form.addRow("Folder", self.folder_label)
-        form.addRow("Size", self.size_label)
-        form.addRow("State", self.state_label)
-        form.addRow("Lock", self.lock_label)
-        form.addRow("On disk", self.disk_label)
+        rows = {
+            FIELD_NAME: self.name_label,
+            FIELD_FOLDER: self.folder_label,
+            FIELD_SIZE: self.size_label,
+            FIELD_STATE: self.state_label,
+            FIELD_LOCK: self.lock_label,
+            FIELD_DISK: self.disk_label,
+        }
+        for field in self._fields:
+            form.addRow(FIELD_LABELS[field], rows[field])
         return box
 
     def _build_actions(self) -> QGroupBox:
@@ -91,14 +155,15 @@ class DetailPanel(QWidget):
             "A copy is kept in .kiln/trash first."
         )
 
-        for button in (
-            self.open_button,
-            self.read_only_button,
-            self.lock_button,
-            self.release_button,
-            self.discard_button,
-        ):
-            layout.addWidget(button)
+        buttons = {
+            ACTION_OPEN: self.open_button,
+            ACTION_READ_ONLY: self.read_only_button,
+            ACTION_LOCK: self.lock_button,
+            ACTION_RELEASE: self.release_button,
+            ACTION_DISCARD: self.discard_button,
+        }
+        for action in self._actions:
+            layout.addWidget(buttons[action])
 
         self.open_button.clicked.connect(lambda: self.open_requested.emit(self._path))
         self.read_only_button.clicked.connect(
@@ -175,7 +240,9 @@ class DetailPanel(QWidget):
         locks_known = state.locks_available if state else True
         held_by_other = entry.locked_by_someone_else
 
-        self.open_button.setEnabled(can_write and not held_by_other)
+        # Unknown lock state disables claiming just as firmly as somebody
+        # else holding the file: "we cannot tell" must not read as "it's free".
+        self.open_button.setEnabled(can_write and locks_known and not held_by_other)
         self.read_only_button.setEnabled(True)
         self.lock_button.setEnabled(
             can_write and locks_known and not held_by_other and not entry.locked_by_me
@@ -186,6 +253,11 @@ class DetailPanel(QWidget):
         if held_by_other:
             self.open_button.setToolTip(
                 f"{entry.lock.owner} holds this file. Ask them to release it."
+            )
+        elif not locks_known:
+            self.open_button.setToolTip(
+                "Kiln cannot reach the lock server, so it cannot tell whether "
+                "anyone else is working on this file. Open read-only instead."
             )
         elif not can_write and state is not None:
             self.open_button.setToolTip(state.blocked_reason)

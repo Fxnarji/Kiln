@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 .kiln/
 
+# Throwaway fixture repositories built by scripts/make_fixture_repo.py
+.fixtures/
+
 # PyInstaller output
 build/
 dist/

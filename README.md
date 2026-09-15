@@ -13,21 +13,24 @@ The entry point is **`run_kiln.py`**, which calls `main()` in `kiln/ui/app.py`.
 
 ```bash
 python -m venv .venv
-.venv/Scripts/python -m pip install PySide6 pytest      # Linux: .venv/bin/python
+.venv/Scripts/python -m pip install -r requirements.txt   # Linux: .venv/bin/python
 
 # build a throwaway project to point it at
-.venv/Scripts/python scripts/make_fixture_repo.py --into ../kiln-fixture
+.venv/Scripts/python scripts/make_fixture_repo.py
 
-.venv/Scripts/python run_kiln.py ../kiln-fixture/workspace
+.venv/Scripts/python run_kiln.py .fixtures/project/workspace
 ```
 
 Passing no path opens a folder picker.
 
+Fixtures are written to `.fixtures/` inside the project, which is gitignored.
+`--into` still accepts any path if you want one elsewhere.
+
 To see the conflict screen, build the fixture mid-merge:
 
 ```bash
-.venv/Scripts/python scripts/make_fixture_repo.py --into ../kiln-conflict --conflict --force
-.venv/Scripts/python run_kiln.py ../kiln-conflict/workspace
+.venv/Scripts/python scripts/make_fixture_repo.py --conflict --force
+.venv/Scripts/python run_kiln.py .fixtures/conflict/workspace
 ```
 
 Requires `git` and `git-lfs` on PATH. Kiln refuses to start without them.
@@ -35,17 +38,34 @@ Requires `git` and `git-lfs` on PATH. Kiln refuses to start without them.
 ## Building a distributable
 
 ```bash
-.venv/Scripts/python -m pip install pyinstaller
-.venv/Scripts/python -m PyInstaller --noconfirm --clean kiln.spec
+.venv/Scripts/python -m pip install -r requirements.txt
+.venv/Scripts/python scripts/build_release.py
 ```
 
-The result is `dist/Kiln/`, containing `Kiln.exe` and its libraries. Ship the
-whole folder — zip it and put it on the internal server.
+That produces two artifacts in `dist/`, either of which is safe to hand to
+someone else:
+
+| Artifact | Notes |
+|---|---|
+| `Kiln-<version>-windows.zip` | The one-folder build, zipped. Extract the whole folder, run `Kiln.exe` inside it. Starts in ~0.6 s. |
+| `Kiln-<version>-windows.exe` | Single file, nothing to extract. Starts in ~1.5 s — it unpacks to a temp directory on every launch. |
+
+**Never send `dist/Kiln/Kiln.exe` on its own.** In the one-folder build that is
+a 2 MB launcher which cannot start without the 110 MB `_internal` folder beside
+it. Sent alone it fails on the other machine with:
+
+```
+Failed to load Python DLL '...\_internal\python311.dll'
+```
+
+That cannot be caught from inside the application — it happens before Python
+starts — which is why `build_release.py` exists and why the loose launcher is
+not one of the artifacts it offers.
 
 Build decisions, all in `kiln.spec` with the reasoning next to them:
 
-- **One-folder, not one-file.** One-file unpacks to a temp directory on every
-  launch: slower to start, and the pattern Windows antivirus objects to most.
+- **Both targets share one Analysis**, so building them together costs far less
+  than two separate builds.
 - **git and git-lfs are not bundled.** Kiln finds them on PATH and refuses to
   start without them. Bundling would mean owning their security updates.
 - **No UPX compression.** A reliable way to get flagged by antivirus.
@@ -53,7 +73,7 @@ Build decisions, all in `kiln.spec` with the reasoning next to them:
   debugging a packaged build, otherwise startup errors are invisible. Normal
   logging goes to the log file and the Diagnostics panel regardless.
 
-Building on Linux uses the same spec file and produces a Linux binary. There is
+Building on Linux uses the same spec file and produces Linux binaries. There is
 no cross-compilation: build each platform on that platform.
 
 ## Tests
@@ -75,8 +95,8 @@ kiln/core/    repository state and policy. Pure Python: no Qt, no
               OS-specific calls. This is where the safety rules live.
 kiln/ui/      PySide6 widgets. Never calls git directly — everything
               goes through the single background worker.
-kiln/cli.py   `kiln lock`, `kiln unlock`, `kiln status`. The interface the
-              Blender addon will use, so locking logic is never duplicated.
+kiln/cli.py   DEPRECATED debugging aid. Not an integration boundary —
+              the Blender addon calls `git lfs lock` directly (SPEC 7.5).
 ```
 
 **`kiln/core` and `kiln/git` import no Qt.** They can be driven from a terminal
@@ -94,6 +114,8 @@ break in those two layers, and reproducing it should take ten seconds.
   `.kiln/conflicts` before anything is overwritten
 - Refusing to act when the repository is in a state Kiln does not understand
 - Diagnostics panel showing the last 20 git commands verbatim
+- Grid thumbnails read straight out of `.blend` files, including the
+  Zstandard-compressed ones current Blender writes by default
 
 ## What does not
 
@@ -101,8 +123,10 @@ break in those two layers, and reproducing it should take ten seconds.
   server, so Kiln shows locks as unavailable — which is worth seeing, since it
   is exactly what artists get when the server is down.
 - No clone screen yet; open an existing clone.
-- No thumbnails, no preview, no branch switching. All deliberate — see the
-  non-goals in the spec.
+- No branch switching. Deliberate — see the non-goals in the spec.
+- Thumbnails only come from `.blend` files, and only when the artist has
+  "Save Preview Images" enabled in Blender's preferences. Everything else
+  gets a colour-coded placeholder tile.
 
 ## Notable deviations from the spec
 

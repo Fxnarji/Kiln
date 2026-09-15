@@ -1,14 +1,27 @@
-"""Command line entry point.
+"""DEPRECATED command line entry point. Debugging aid only.
 
-This exists so that integrations — the Blender addon first — can lock and query
-files without importing Qt or reimplementing any of the locking rules. It is
-the same code path the GUI uses, so the two cannot drift apart.
+This was built as the integration boundary for the Blender addon, on the
+argument that locking logic should not be duplicated. That argument did not
+survive contact: `git lfs lock` already queries the server, already refuses
+when somebody else holds the file, and already clears the read-only flag on a
+`lockable` file. What this module adds on top is roughly two conveniences,
+which is not worth a second binary and a process boundary.
 
-    kiln status [--json]
-    kiln locks
-    kiln lock <path>
-    kiln unlock <path>
-    kiln file <path>
+The addon calls `git lfs lock` directly instead — see SPEC-v1.md 7.5, which
+also records why: spec 10.6 says Kiln is never required, and an addon that can
+only lock through Kiln would make a broken Kiln break Blender too.
+
+**Do not build on this.** Anything it does, git does directly and better. It is
+kept because it costs nothing and is occasionally handy for inspecting what
+kiln.core thinks the repository looks like without opening the GUI. It gets no
+further investment, no new commands, and no packaged binary. If it ever breaks
+in a way that is not trivial to fix, deleting it is a valid answer.
+
+    python -m kiln.cli status [--json]
+    python -m kiln.cli locks
+    python -m kiln.cli lock <path>
+    python -m kiln.cli unlock <path>
+    python -m kiln.cli file <path>
 
 Exit codes: 0 success, 1 refused or failed, 2 bad usage.
 """
@@ -31,7 +44,13 @@ EXIT_USAGE = 2
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="kiln", description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="kiln",
+        description=(
+            "DEPRECATED debugging aid. Use git directly — anything this does, "
+            "git does better. See SPEC-v1.md 7.5."
+        ),
+    )
     parser.add_argument(
         "--repo",
         type=Path,

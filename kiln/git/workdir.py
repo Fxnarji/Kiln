@@ -6,6 +6,7 @@ artist's changes away, so callers must take a backup first (see core.trash).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from kiln.git.runner import GitRunner
@@ -16,6 +17,35 @@ LFS_CHECKOUT_TIMEOUT_SECONDS = 600.0
 def stage_file(runner: GitRunner, repo_relative_path: str) -> None:
     """Stage exactly one path. Never `git add -A`, never `git add .`."""
     runner.run("add", "--", repo_relative_path)
+
+
+def stage_paths(runner: GitRunner, repo_root: Path, repo_relative_paths: list[str]) -> None:
+    """Stage exactly these paths, whether they were changed, added or deleted.
+
+    `git add -- <path>` cannot stage a file whose folder is gone: it warns
+    "could not open directory" and fails, and once the deletion is already in
+    the index (as `delete_to_trash` leaves it) the path matches nothing at all.
+    Missing files are therefore removed from the index instead, which is a
+    no-op for deletions that are already staged.
+
+    Paths go in on stdin so a deleted folder with thousands of files cannot
+    overflow the Windows command line.
+    """
+    present: list[str] = []
+    missing: list[str] = []
+    for path in repo_relative_paths:
+        (present if os.path.lexists(repo_root / path) else missing).append(path)
+    if present:
+        runner.run(
+            "add", "--pathspec-from-file=-", "--pathspec-file-nul",
+            stdin="\0".join(present),
+        )
+    if missing:
+        runner.run(
+            "rm", "--cached", "--force", "--quiet", "--ignore-unmatch",
+            "--pathspec-from-file=-", "--pathspec-file-nul",
+            stdin="\0".join(missing),
+        )
 
 
 def stage_deleted_path(runner: GitRunner, repo_relative_path: str) -> None:

@@ -24,6 +24,12 @@ log = logging.getLogger(__name__)
 # default: an artist waiting to open a file should be told quickly.
 LOCK_TIMEOUT_SECONDS = 30.0
 
+# How `git lfs env` labels the resolved LFS API endpoint.
+ENDPOINT_PREFIX = "Endpoint="
+
+# The LFS locking API is served over HTTP and nothing else.
+HTTP_SCHEMES = ("http://", "https://")
+
 
 @dataclass(frozen=True)
 class LockInfo:
@@ -33,23 +39,56 @@ class LockInfo:
     is_mine: bool
 
 
+def locking_endpoint(runner: GitRunner) -> str:
+    """The LFS API endpoint git resolves for this remote.
+
+    `git lfs env` reports it as `Endpoint=<url> (auth=...)`.
+    """
+    result = runner.run_lfs("env", check=False)
+    for line in result.stdout.splitlines():
+        if line.startswith(ENDPOINT_PREFIX):
+            return line[len(ENDPOINT_PREFIX) :].split(" ", 1)[0].strip()
+    return ""
+
+
+def endpoint_supports_locking(endpoint: str) -> bool:
+    """Could this endpoint serve the LFS locking API?
+
+    The API is HTTP only, so anything else — a local path, a file:// URL, a
+    bare ssh remote — can never report locks. Split out from locking_supported
+    so the rule can be tested without a repository.
+    """
+    return endpoint.startswith(HTTP_SCHEMES)
+
+
+def locking_supported(runner: GitRunner) -> bool:
+    """Can this remote support file locking at all?
+
+    This check exists because git-lfs does not fail when it cannot. Asked for
+    locks against a file:// remote it prints a hint to stderr, **exits 0**, and
+    returns an empty list. Trusting the exit code would therefore render
+    "nobody holds this file" when the truth is "there is no way to know", which
+    is the single most dangerous thing this application can display.
+    """
+    return endpoint_supports_locking(locking_endpoint(runner))
+
+
 def list_locks(runner: GitRunner) -> list[LockInfo]:
     """Fetch all locks from the server.
 
-    Raises GitCommandError if the server cannot be reached; the caller decides
-    whether that means "offline" or "broken".
+    Callers must check locking_supported first; this reports what the server
+    said, and cannot tell on its own whether a server was involved.
+
+    Only the --verify form is used. It is what makes the server itself say
+    which locks are ours, so ownership never has to be guessed by comparing a
+    local git user.name against a server account name — two things that are
+    routinely different, and getting it wrong would show another artist's lock
+    as your own.
     """
-    try:
-        result = runner.run_lfs(
-            "locks", "--verify", "--json", timeout=LOCK_TIMEOUT_SECONDS
-        )
-        return _parse_verified(result.stdout)
-    except GitCommandError:
-        # --verify is not supported everywhere. Fall back to the plain listing
-        # and work out ownership from the local user name.
-        log.debug("locks --verify failed, falling back to plain listing")
-        result = runner.run_lfs("locks", "--json", timeout=LOCK_TIMEOUT_SECONDS)
-        return _parse_plain(result.stdout, local_user_name(runner))
+    result = runner.run_lfs(
+        "locks", "--verify", "--json", timeout=LOCK_TIMEOUT_SECONDS
+    )
+    return _parse_verified(result.stdout)
 
 
 def lock_file(runner: GitRunner, repo_relative_path: str) -> None:
@@ -71,12 +110,6 @@ def unlock_file(runner: GitRunner, repo_relative_path: str) -> None:
     runner.run_lfs("unlock", "--", repo_relative_path, timeout=LOCK_TIMEOUT_SECONDS)
 
 
-def local_user_name(runner: GitRunner) -> str:
-    """The configured git user name, used only by the fallback path above."""
-    result = runner.run("config", "user.name", check=False)
-    return result.stdout.strip()
-
-
 # -- parsing ---------------------------------------------------------------
 
 
@@ -88,16 +121,6 @@ def _parse_verified(raw: str) -> list[LockInfo]:
         for entry in payload.get(key) or []:
             locks.append(_lock_from_entry(entry, is_mine))
     return locks
-
-
-def _parse_plain(raw: str, local_user: str) -> list[LockInfo]:
-    """Parse the flat list shape of `locks --json`."""
-    payload = json.loads(raw or "[]")
-    entries = payload if isinstance(payload, list) else payload.get("locks") or []
-    return [
-        _lock_from_entry(entry, is_mine=_owner_name(entry) == local_user)
-        for entry in entries
-    ]
 
 
 def _lock_from_entry(entry: dict, is_mine: bool) -> LockInfo:

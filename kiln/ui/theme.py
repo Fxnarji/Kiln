@@ -12,8 +12,13 @@ from PySide6.QtWidgets import QApplication
 
 # Roles that carry meaning in the file tables. Kept here so there is one place
 # to change if any of them turn out to be hard to read.
-COLOUR_LOCKED_BY_ME = QColor("#E2703A")
+# Green and red carry the only question an artist asks about a lock: can I
+# have this file, or is somebody else in it. Nothing else in the application
+# is allowed to use these two, so the answer is never ambiguous.
+COLOUR_LOCKED_BY_ME = QColor("#5FAE6B")
 COLOUR_LOCKED_BY_OTHER = QColor("#C4574E")
+
+COLOUR_MODIFIED = QColor("#E2703A")
 COLOUR_CONFLICTED = QColor("#C4574E")
 COLOUR_NEW = QColor("#6FA8A0")
 COLOUR_MUTED = QColor("#8B9099")
@@ -45,9 +50,14 @@ def apply_dark_theme(application: QApplication) -> None:
     application.setPalette(palette)
 
 
+def lock_colour(is_mine: bool) -> QColor:
+    """What a held file is drawn in: green if it is yours, red if it is not."""
+    return COLOUR_LOCKED_BY_ME if is_mine else COLOUR_LOCKED_BY_OTHER
+
+
 def status_colour(status: str) -> QColor | None:
     return {
         "conflicted": COLOUR_CONFLICTED,
         "new": COLOUR_NEW,
-        "modified": COLOUR_LOCKED_BY_ME,
+        "modified": COLOUR_MODIFIED,
     }.get(status)

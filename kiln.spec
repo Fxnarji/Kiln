@@ -53,12 +53,16 @@ EXCLUDED_MODULES = [
     "PIL",
 ]
 
+# zstandard is a real runtime dependency: without it every preview falls back
+# to a placeholder tile, because current Blender compresses .blend files.
+REQUIRED_PACKAGES = ["zstandard"]
+
 analysis = Analysis(
     ["run_kiln.py"],
     pathex=["."],
     binaries=[],
     datas=[("kiln/assets/icons", "kiln/assets/icons")],
-    hiddenimports=collect_submodules("kiln"),
+    hiddenimports=collect_submodules("kiln") + REQUIRED_PACKAGES,
     hookspath=[],
     runtime_hooks=[],
     excludes=EXCLUDED_QT_MODULES + EXCLUDED_MODULES,
@@ -67,7 +71,23 @@ analysis = Analysis(
 
 pyz = PYZ(analysis.pure)
 
-executable = EXE(
+# Both targets share this one Analysis, so building them together costs far
+# less than twice a single build.
+#
+# Common settings:
+#   upx=False    UPX compression is a reliable way to get flagged by antivirus
+#   console=False  no console window behind the app. Anything that would have
+#                  gone to a console is in the log file and the Diagnostics
+#                  panel instead. Flip to True while debugging a packaged build.
+
+# --- Target 1: one folder -----------------------------------------------
+# dist/Kiln/Kiln.exe plus dist/Kiln/_internal/
+#
+# Starts fastest and is the friendliest to antivirus, but the exe is only a
+# launcher: it cannot run without _internal beside it. Ship the folder zipped,
+# never the loose exe. scripts/build_release.py exists to enforce that.
+
+folder_executable = EXE(
     pyz,
     analysis.scripts,
     [],
@@ -75,18 +95,37 @@ executable = EXE(
     name="Kiln",
     debug=False,
     strip=False,
-    upx=False,  # UPX compression is a reliable way to get flagged by antivirus
-    # Windowed: no console window behind the app. Everything that would have
-    # gone to a console is in the log file and the Diagnostics panel instead.
-    # Flip this to True while debugging a packaged build.
+    upx=False,
     console=False,
 )
 
 COLLECT(
-    executable,
+    folder_executable,
     analysis.binaries,
     analysis.datas,
     strip=False,
     upx=False,
     name="Kiln",
+)
+
+# --- Target 2: one file -------------------------------------------------
+# dist/Kiln-portable.exe
+#
+# Everything in a single file, so it cannot be distributed incorrectly. The
+# cost is paid at every launch: the bundle unpacks to a temporary directory
+# first, which is slower to start and is the shape antivirus heuristics tend to
+# dislike. For an application opened once and left running for a work session,
+# that trade is usually worth it.
+
+EXE(
+    pyz,
+    analysis.scripts,
+    analysis.binaries,
+    analysis.datas,
+    [],
+    name="Kiln-portable",
+    debug=False,
+    strip=False,
+    upx=False,
+    console=False,
 )

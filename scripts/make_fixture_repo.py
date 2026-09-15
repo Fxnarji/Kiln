@@ -2,12 +2,16 @@
 
 Run this to get something to point Kiln at without needing a Gitea server:
 
-    python scripts/make_fixture_repo.py --into ../kiln-fixture
-    python -m kiln.ui.app ../kiln-fixture/workspace
+    python scripts/make_fixture_repo.py
+    python run_kiln.py .fixtures/project/workspace
 
 It creates a bare "server" repo, a working clone, and a second clone standing in
 for another artist. Pass --conflict to leave the working clone mid-merge with a
 conflicted .blend, which is the state the conflict screen exists for.
+
+Fixtures are written inside the project, under .fixtures/, which is gitignored.
+Keeping them in the tree means throwaway repositories never end up scattered
+around the parent directory. --into can still point anywhere if you want it to.
 
 Locking is not simulated: that needs a real LFS server. Kiln will report locks
 as unavailable, which is itself worth seeing — it is what artists get when the
@@ -41,6 +45,10 @@ PROJECT_FILES = {
 }
 
 CONFLICT_FILE = "chars/Character01/src/char.blend"
+
+# Fixtures live inside the project so throwaway repositories never end up
+# scattered around the parent directory. Gitignored.
+FIXTURE_DIRECTORY = ".fixtures"
 
 
 def run(argv: list[str], cwd: Path) -> None:
@@ -130,10 +138,34 @@ def leave_mid_merge(workspace: Path) -> None:
     )  # expected to fail with a conflict
 
 
+def default_location(conflict: bool) -> Path:
+    """Where a fixture goes unless --into says otherwise.
+
+    Anchored to the project root rather than the working directory, so the
+    fixture lands in the same gitignored place however the script is invoked.
+    The two variants get separate folders so building one does not quietly
+    destroy the other.
+    """
+    project_root = Path(__file__).resolve().parent.parent
+    return project_root / FIXTURE_DIRECTORY / ("conflict" if conflict else "project")
+
+
+def _display_path(path: Path) -> str:
+    """Show a project-relative path when the fixture is inside the project."""
+    project_root = Path(__file__).resolve().parent.parent
+    try:
+        return path.resolve().relative_to(project_root).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--into", type=Path, required=True, help="directory to create the fixture in"
+        "--into",
+        type=Path,
+        default=None,
+        help=f"directory to create the fixture in (default: {FIXTURE_DIRECTORY}/...)",
     )
     parser.add_argument(
         "--conflict",
@@ -145,7 +177,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
 
-    root = arguments.into.resolve()
+    chosen = arguments.into or default_location(arguments.conflict)
+    root = chosen.resolve()
     if root.exists():
         if not arguments.force:
             print(f"{root} already exists (use --force to replace it)", file=sys.stderr)
@@ -176,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  other clone: {other}")
     print()
     print("Open it with:")
-    print(f"  python -m kiln.ui.app {workspace}")
+    print(f"  python run_kiln.py {_display_path(workspace)}")
     return 0
 
 

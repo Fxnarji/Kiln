@@ -1,0 +1,7 @@
+# Runtime
+PySide6>=6.6
+zstandard>=0.22        # reading previews out of Blender's compressed .blend files
+
+# Development
+pytest>=8.0
+pyinstaller>=6.0

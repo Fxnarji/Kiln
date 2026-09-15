@@ -121,6 +121,8 @@ class FileTable(QWidget):
             item.setData(PATH_ROLE, entry.path)
             item.setData(ITEM_KIND_ROLE, "file")
             item.setToolTip(self._tooltip(entry))
+            if entry.lock is not None:
+                item.setForeground(theme.lock_colour(entry.lock.is_mine))
             self.grid.addItem(item)
 
     def _fill_table(self) -> None:
@@ -157,11 +159,7 @@ class FileTable(QWidget):
             if colour is not None:
                 item.setForeground(colour)
         elif column == 4 and entry.lock is not None:
-            item.setForeground(
-                theme.COLOUR_LOCKED_BY_ME
-                if entry.lock.is_mine
-                else theme.COLOUR_LOCKED_BY_OTHER
-            )
+            item.setForeground(theme.lock_colour(entry.lock.is_mine))
 
     def selected_path(self) -> str:
         if self.presentations.currentWidget() is self.table:

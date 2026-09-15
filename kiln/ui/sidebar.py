@@ -119,7 +119,6 @@ class Sidebar(QWidget):
 
     def _build_folders(self, folders: list[str], expanded: set[str]) -> None:
         root = self._section("WORKING TREE")
-        pinned_paths = {pin.path for pin in self._pins}
         nodes: dict[str, QTreeWidgetItem] = {"": root}
 
         for folder in folders:
@@ -128,8 +127,8 @@ class Sidebar(QWidget):
             item = QTreeWidgetItem(parent, [name])
             item.setData(0, KIND_ROLE, KIND_FOLDER)
             item.setData(0, VALUE_ROLE, folder)
-            if folder in pinned_paths:
-                item.setForeground(0, theme.COLOUR_LOCKED_BY_ME)
+            # Deliberately not coloured for being pinned: a pin already has its
+            # own marker above, and orange in this application means a lock.
             item.setExpanded(folder in expanded)
             nodes[folder] = item
 

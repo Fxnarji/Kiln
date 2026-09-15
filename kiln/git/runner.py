@@ -21,7 +21,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
-from kiln.errors import GitCommandError, GitNotFoundError
+from kiln.errors import AuthenticationError, GitCommandError, GitNotFoundError
 
 log = logging.getLogger(__name__)
 
@@ -124,23 +124,27 @@ class GitRunner:
         self._record(result)
 
         if check and not result.ok:
-            raise GitCommandError(
-                result.argv, result.returncode, result.stdout, result.stderr
-            )
+            raise _failure_for(result)
         return result
 
     @staticmethod
     def _environment() -> dict[str, str]:
         """Environment for every git call.
 
-        GIT_TERMINAL_PROMPT=0 is the important one: without it a credential
-        prompt would block forever behind a GUI with nowhere to type.
+        GIT_TERMINAL_PROMPT=0 stops git asking for a username on a terminal
+        that does not exist — behind a GUI that prompt has nowhere to appear
+        and would simply hang.
+
+        Git Credential Manager is deliberately *not* disabled. It shows its own
+        window, which is a perfectly good way for a desktop application to
+        authenticate, and turning it off leaves an artist with no way to log in
+        at all: every remote call fails with "could not read Username" and
+        there is nothing they can do about it from inside Kiln.
         """
         import os
 
         env = dict(os.environ)
         env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GCM_INTERACTIVE"] = "never"
         env["LC_ALL"] = "C"
         return env
 
@@ -158,6 +162,22 @@ class GitRunner:
     def recent_commands(self) -> list[CommandResult]:
         """The last commands run, newest last. Shown in the advanced panel."""
         return list(self._recent)
+
+
+def _failure_for(result: CommandResult) -> GitCommandError:
+    """Classify a failed command.
+
+    Authentication is separated out because it is the one failure an artist can
+    actually fix, and because raw git output for it is four lines of internals
+    that explain nothing to someone who does not use git.
+    """
+    combined = f"{result.stderr}\n{result.stdout}"
+    error_type = (
+        AuthenticationError
+        if AuthenticationError.looks_like_auth_failure(combined)
+        else GitCommandError
+    )
+    return error_type(result.argv, result.returncode, result.stdout, result.stderr)
 
 
 def find_repository_root(start: Path) -> Path | None:
