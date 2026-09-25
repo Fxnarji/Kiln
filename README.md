@@ -78,9 +78,11 @@ no cross-compilation: build each platform on that platform.
 
 ## Updates
 
-Every push to `main` or `dev` builds on GitHub Actions and replaces a rolling
-pre-release, `latest-main` or `latest-dev`, with that build's zip, portable exe,
-and `Kiln-windows.json` manifest. Pull request builds are not published.
+Every push to `main`, merged pull requests included, builds on GitHub Actions
+and replaces the rolling pre-release `latest-main` with that build's zip,
+portable exe, and `Kiln-windows.json` manifest. Nothing else builds on its own;
+"Run workflow" on the Actions tab builds any branch by hand, and only a build of
+`main` is published.
 
 A build from CI knows its channel and run number (`kiln/build_info.py`). At
 startup it fetches its channel's manifest and, if the build there is newer,

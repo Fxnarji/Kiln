@@ -1,24 +1,24 @@
-# Build Kiln on every push to main or dev and every pull request into main.
+# Build Kiln on every push to main, which includes merging a pull request into
+# it. Nothing else builds on its own: a build takes several minutes, and dev is
+# pushed to far too often for that. "Run workflow" on the Actions tab builds any
+# branch by hand.
 #
 # The windows job tests, builds the one-folder zip and the portable exe, and
 # uploads both together with Kiln-windows.json: the manifest the in-app update
 # check reads to find, compare, and verify a newer build (see kiln/update.py).
 #
-# Pushes then publish those files to a rolling pre-release per branch, tagged
-# latest-<branch>. Workflow artifacts cannot be downloaded without signing in to
+# A build of main then publishes those files to a rolling pre-release tagged
+# latest-main. Workflow artifacts cannot be downloaded without signing in to
 # GitHub, even on a public repository; release assets can, at a fixed URL:
 #
 #   https://github.com/<owner>/<repo>/releases/download/latest-main/Kiln-windows.json
 #
-# Pull request builds are never published: nothing installed should update to
-# one.
+# A manual build of any other branch is kept as a workflow artifact only.
 
 name: Build
 
 on:
   push:
-    branches: [main, dev]
-  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -56,8 +56,8 @@ jobs:
           # The run number only ever increases, which is what lets an update
           # check order builds without parsing version strings.
           KILN_BUILD_NUMBER: ${{ github.run_number }}
-          KILN_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
-          KILN_CHANNEL: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
+          KILN_COMMIT: ${{ github.sha }}
+          KILN_CHANNEL: ${{ github.ref_name }}
         run: python scripts/build_release.py
 
       - uses: actions/upload-artifact@v4
@@ -73,7 +73,7 @@ jobs:
   publish:
     # A manual run from any other branch would otherwise publish a channel no
     # installed Kiln is on.
-    if: github.event_name != 'pull_request' && (github.ref_name == 'main' || github.ref_name == 'dev')
+    if: github.ref_name == 'main'
     needs: windows
     runs-on: ubuntu-latest
     timeout-minutes: 10
