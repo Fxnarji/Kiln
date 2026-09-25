@@ -258,7 +258,7 @@ class TestAuthenticationFailures:
         assert isinstance(error, GitCommandError)
         assert error.diagnostics()
 
-    def test_credential_manager_is_not_disabled(self):
+    def test_credential_manager_is_not_disabled(self, monkeypatch):
         """Blocking GCM leaves an artist with no way to authenticate at all.
 
         GIT_TERMINAL_PROMPT stays off — there is no terminal to prompt into —
@@ -267,6 +267,9 @@ class TestAuthenticationFailures:
         """
         from kiln.git.runner import GitRunner
 
+        # What is under test is that Kiln never adds it. GitHub's Windows
+        # runners set it themselves, and Kiln passes the environment through.
+        monkeypatch.delenv("GCM_INTERACTIVE", raising=False)
         environment = GitRunner._environment()
 
         assert environment["GIT_TERMINAL_PROMPT"] == "0"
