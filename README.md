@@ -76,6 +76,24 @@ Build decisions, all in `kiln.spec` with the reasoning next to them:
 Building on Linux uses the same spec file and produces Linux binaries. There is
 no cross-compilation: build each platform on that platform.
 
+## Updates
+
+Every push to `main` or `dev` builds on GitHub Actions and replaces a rolling
+pre-release, `latest-main` or `latest-dev`, with that build's zip, portable exe,
+and `Kiln-windows.json` manifest. Pull request builds are not published.
+
+A build from CI knows its channel and run number (`kiln/build_info.py`). At
+startup it fetches its channel's manifest and, if the build there is newer,
+shows **Update available** in the toolbar. **Project > Check for updates...**
+does the same on demand. Updating downloads the matching file, checks its
+SHA-256 against the manifest, unpacks it beside the installation, and quits;
+a small batch script then swaps the new build in and starts it
+(`kiln/update.py`, `kiln/installer.py`). If the swap fails, the old version is
+left in place and started instead, and `update.log` in the config directory
+says why.
+
+Builds run from source or built locally are never offered updates.
+
 ## Tests
 
 ```bash
@@ -93,6 +111,8 @@ kiln/git/     subprocess wrapper over git and git-lfs. Parsers for
               porcelain v2, lfs locks --json, and the commit log.
 kiln/core/    repository state and policy. Pure Python: no Qt, no
               OS-specific calls. This is where the safety rules live.
+kiln/update.py, kiln/installer.py
+              finding, downloading and installing a newer build. No Qt.
 kiln/ui/      PySide6 widgets. Never calls git directly — everything
               goes through the single background worker.
 kiln/cli.py   DEPRECATED debugging aid. Not an integration boundary —

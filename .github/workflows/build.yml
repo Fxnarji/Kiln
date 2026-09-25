@@ -1,14 +1,23 @@
-# Build Kiln on every push to main and every pull request into it.
+# Build Kiln on every push to main or dev and every pull request into main.
 #
-# The job tests, builds the one-folder zip and the portable exe, and uploads
-# both together with Kiln-windows.json: the manifest a future in-app update
-# check reads to find, compare, and verify a newer build (see kiln/build_info.py).
+# The windows job tests, builds the one-folder zip and the portable exe, and
+# uploads both together with Kiln-windows.json: the manifest the in-app update
+# check reads to find, compare, and verify a newer build (see kiln/update.py).
+#
+# Pushes then publish those files to a rolling pre-release per branch, tagged
+# latest-<branch>. Workflow artifacts cannot be downloaded without signing in to
+# GitHub, even on a public repository; release assets can, at a fixed URL:
+#
+#   https://github.com/<owner>/<repo>/releases/download/latest-main/Kiln-windows.json
+#
+# Pull request builds are never published: nothing installed should update to
+# one.
 
 name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -60,3 +69,37 @@ jobs:
             dist/Kiln-*.json
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    # A manual run from any other branch would otherwise publish a channel no
+    # installed Kiln is on.
+    if: github.event_name != 'pull_request' && (github.ref_name == 'main' || github.ref_name == 'dev')
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: latest-${{ github.ref_name }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Kiln-windows-b${{ github.run_number }}
+          path: dist
+
+      # Replaced rather than edited: file names carry the build number, so
+      # uploading over the old release would leave every past build's files
+      # piling up on it. For the few seconds in between, an update check finds
+      # nothing and says it could not check, which is harmless.
+      - name: Replace the rolling release
+        run: |
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          gh release create "$TAG" dist/* \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Kiln ${{ github.ref_name }} build ${{ github.run_number }}" \
+            --notes "Latest build of \`${{ github.ref_name }}\`, from ${GITHUB_SHA::7}. Kiln updates itself from here: use Check for updates in the Project menu."

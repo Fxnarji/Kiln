@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from kiln.core.models import Pin, RepoState, describe_size
 from kiln.core.repository import Repository
+from kiln import build_info, update
 from kiln.core.settings import save_last_project
 from kiln.errors import KilnError, LockRefusedError
 from kiln.git.runner import find_repository_root
@@ -50,6 +51,7 @@ from kiln.ui.pin_dialog import PinDialog
 from kiln.ui.settings_dialog import ProjectSettingsDialog
 from kiln.ui.sidebar import Sidebar
 from kiln.ui.thumbnails import ThumbnailCache
+from kiln.ui.update_dialog import Background, UpdateDialog
 from kiln.ui.views import VIEW_WINDOWS, ViewWindow
 from kiln.ui.worker import JobRunner
 
@@ -73,6 +75,11 @@ class MainWindow(QMainWindow):
     #: no parent, so without a reference here Python would collect it the
     #: moment the method that made it returned.
     _windows: list["MainWindow"] = []
+
+    #: The newer build the startup check found, shared so that a window opened
+    #: later from Project > Open project offers it too without asking again.
+    _update_checked = False
+    _available_update: update.Release | None = None
 
     def __init__(self, repository: Repository):
         super().__init__()
@@ -104,6 +111,7 @@ class MainWindow(QMainWindow):
         self._lock_timer.start(LOCK_REFRESH_INTERVAL_MS)
 
         self.refresh(with_locks=True)
+        self._check_for_update_quietly()
 
     # -- running work -------------------------------------------------------
 
@@ -168,6 +176,12 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addWidget(self._build_project_button())
 
+        # Only shown once the startup check finds a newer build.
+        self.update_action = QAction("Update available", self)
+        self.update_action.triggered.connect(self._show_update_dialog)
+        self.update_action.setVisible(False)
+        toolbar.addAction(self.update_action)
+
     def _build_project_button(self) -> QToolButton:
         """The Project drop-down, in the same row as Pull, Refresh, and the
         rest.
@@ -190,6 +204,13 @@ class MainWindow(QMainWindow):
         settings_action = QAction("Settings...", self)
         settings_action.triggered.connect(self._show_project_settings)
         menu.addAction(settings_action)
+
+        menu.addSeparator()
+
+        update_action = QAction("Check for updates...", self)
+        update_action.setToolTip(build_info.load().label)
+        update_action.triggered.connect(self._show_update_dialog)
+        menu.addAction(update_action)
 
         button = QToolButton(self)
         button.setText("Project")
@@ -668,6 +689,42 @@ class MainWindow(QMainWindow):
 
     def _show_project_settings(self) -> None:
         ProjectSettingsDialog(self.repository, self).exec()
+
+    # -- updates ------------------------------------------------------------
+
+    def _check_for_update_quietly(self) -> None:
+        """Look once per session for a newer build, and say nothing unless
+        there is one. Being offline is not worth interrupting anybody for."""
+        if MainWindow._update_checked:
+            self._show_update_available(MainWindow._available_update)
+            return
+        current = build_info.load()
+        if not current.is_ci_build:
+            return
+        MainWindow._update_checked = True
+
+        task = Background(self)
+        task.succeeded.connect(self._show_update_available)
+        task.failed.connect(lambda error: None)
+        task.run(lambda: update.find_update(current))
+
+    def _show_update_available(self, release: update.Release | None) -> None:
+        MainWindow._available_update = release
+        for window in MainWindow._windows:
+            window.update_action.setVisible(release is not None)
+            if release is not None:
+                window.update_action.setToolTip(f"Build {release.build.build} is available")
+
+    def _show_update_dialog(self) -> None:
+        UpdateDialog(
+            self, release=MainWindow._available_update, busy_reason=self._busy_reason
+        ).exec()
+
+    def _busy_reason(self) -> str:
+        """Why Kiln should not quit right now, or "" if it can."""
+        if any(window.jobs.busy for window in MainWindow._windows):
+            return "A git operation is still running (see the status bar)."
+        return ""
 
     # -- misc ---------------------------------------------------------------
 
