@@ -75,6 +75,10 @@ class UpdateDialog(QDialog):
 
     `busy_reason` is asked just before restarting; it returns why Kiln cannot
     quit right now (a push still running, say), or "" if it can.
+
+    A release handed in (from the startup check) is only what to offer: the
+    manifest is read again when the artist clicks Download, since every push
+    to main replaces the files the earlier check saw.
     """
 
     def __init__(
@@ -93,6 +97,7 @@ class UpdateDialog(QDialog):
         self.release: update.Release | None = None
         self.busy_reason = busy_reason
         self._cancel = threading.Event()
+        self._downloading = False
         self._staged = None  # the downloaded build, once it is ready
         self._task: Background | None = None
 
@@ -146,13 +151,22 @@ class UpdateDialog(QDialog):
         if release is None:
             self._show(f"Kiln is up to date.\n\nYou have {describe(self.current)}.")
             return
+        # Whether Kiln can write beside itself is a file system probe, which
+        # on a network share is slow enough to freeze the window.
+        self._show("Checking for updates...", busy=True)
+        installation = self.installation
+        self._start(
+            lambda: installer.unavailable_reason(installation),
+            lambda reason: self._present(release, reason),
+            self._check_failed,
+        )
 
+    def _present(self, release: update.Release, reason: str) -> None:
         self.release = release
         text = (
             f"A newer Kiln is available: {describe(release.build)}.\n"
             f"You have {describe(self.current)}."
         )
-        reason = installer.unavailable_reason(self.installation)
         if not reason and release.file(self.installation.artifact_kind) is None:
             reason = "This build was published without the file this copy of Kiln updates from."
         if reason:
@@ -181,60 +195,129 @@ class UpdateDialog(QDialog):
         self._download()
 
     def _download(self) -> None:
-        release, installation = self.release, self.installation
-        item = release.file(installation.artifact_kind)
-        self._cancel.clear()
-        self._show(f"Downloading {item.name}...", busy=True, cancel=True)
-        self.progress.setRange(0, max(item.size, 1))
+        current, installation = self.current, self.installation
+        kind = installation.artifact_kind
+        cancelled = self._cancel
+        cancelled.clear()
+        self._downloading = True
+        self._show("Downloading the update...", busy=True, cancel=True)
 
         task = Background(self)
-        task.progressed.connect(lambda done, _total: self.progress.setValue(done))
-        cancelled = self._cancel
+        task.progressed.connect(self._show_progress)
 
         def work():
-            installer.clear_staging(installation)
-            downloaded = update.download(
-                item,
-                installation.download_path(item.name),
-                progress=task.report_progress,
-                cancelled=cancelled,
-            )
-            return installer.prepare(installation, downloaded)
+            try:
+                installer.clear_staging(installation)
+                release = update.find_update(current)
+                if release is None:
+                    return None, None
+                item = release.file(kind)
+                if item is None:
+                    raise update.UpdateError(
+                        "The newest build was published without the file this "
+                        "copy of Kiln updates from."
+                    )
+                task.report_progress(0, item.size)
+                downloaded = update.download(
+                    item,
+                    installation.download_path(item.name),
+                    progress=task.report_progress,
+                    cancelled=cancelled,
+                )
+                # Checking and unpacking take a while after the last byte, and
+                # Cancel must still mean cancel then.
+                if cancelled.is_set():
+                    raise update.DownloadCancelled("The download was cancelled.")
+                staged = installer.prepare(installation, downloaded)
+                if cancelled.is_set():
+                    raise update.DownloadCancelled("The download was cancelled.")
+                return release, staged
+            except BaseException:
+                installer.clear_staging(installation)
+                raise
 
-        self._start(work, self._restart, self._download_failed, task)
+        self._start(work, self._downloaded, self._download_failed, task)
+
+    def _show_progress(self, done: int, total: int) -> None:
+        self.progress.setRange(0, max(total, 1))
+        self.progress.setValue(done)
+
+    def _downloaded(self, result) -> None:
+        self._downloading = False
+        release, staged = result
+        if release is None:
+            self._show(
+                "The build this was offering is gone, and nothing newer than "
+                f"yours has replaced it.\n\nYou have {describe(self.current)}."
+            )
+            return
+        self.release = release
+        if self._cancel.is_set():
+            self._clear_staging()
+            self._offer(release)
+            return
+        self._restart(staged)
 
     def _download_failed(self, error: Exception) -> None:
-        installer.clear_staging(self.installation)
+        self._downloading = False
         if isinstance(error, update.DownloadCancelled):
             self._offer(self.release)
             return
         log.warning("update download failed: %s", error)
-        self._show(f"The update could not be downloaded.\n\n{error}", install=True, page=True)
+        self._show(
+            f"The update could not be downloaded.\n\n{error}",
+            install=True,
+            retry=True,
+            page=True,
+        )
         self.install_button.setText("Try again")
 
     def _restart(self, staged) -> None:
         self._staged = staged
         reason = self.busy_reason()
         if reason:
-            self._show(
-                f"The update is downloaded, but {reason[0].lower()}{reason[1:]}\n\n"
-                "Restart once it has finished.",
-                install=True,
+            self._show_restart_blocked(
+                f"{reason[0].lower()}{reason[1:]}\n\nRestart once it has finished."
             )
-            self.install_button.setText("Restart now")
             return
+
+        # Close every other window first, and only start the updater once they
+        # have all gone. A window that refuses (an error box waiting for OK)
+        # would keep Kiln running, and the updater would wait on it in vain.
+        others = [
+            widget
+            for widget in QApplication.topLevelWidgets()
+            if widget.isVisible() and widget is not self
+        ]
+        for widget in others:
+            widget.close()
+        if any(widget.isVisible() for widget in others):
+            self._show_restart_blocked(
+                "another Kiln window would not close.\n\nClose it, then restart."
+            )
+            return
+
         try:
             installer.launch_replacement(self.installation, staged)
         except installer.InstallError as error:
             self._staged = None
-            installer.clear_staging(self.installation)
+            self._clear_staging()
             self._show(str(error), page=True)
             return
 
         log.info("restarting into %s", describe(self.release.build))
-        self._show("Restarting Kiln...")
-        QApplication.closeAllWindows()
+        self.accept()
         QApplication.quit()
+
+    def _show_restart_blocked(self, why: str) -> None:
+        self._show(f"The update is downloaded, but {why}", install=True)
+        self.install_button.setText("Restart now")
+
+    def _clear_staging(self) -> None:
+        """Delete a staged build off the UI thread: it can be 110 MB of files."""
+        installation = self.installation
+        task = Background(self)
+        task.run(lambda: installer.clear_staging(installation))
 
     # -- plumbing -----------------------------------------------------------
 
@@ -262,6 +345,7 @@ class UpdateDialog(QDialog):
         self.retry_button.setVisible(retry)
         self.page_button.setVisible(page or not self.current.is_ci_build)
         self.close_button.setText("Cancel" if cancel else "Close")
+        self.close_button.setEnabled(True)
 
     def _open_page(self) -> None:
         channel = self.current.channel if self.current.is_ci_build else "main"
@@ -269,7 +353,9 @@ class UpdateDialog(QDialog):
 
     def reject(self) -> None:
         """Close, or during a download, cancel it and go back to the offer."""
-        if self.close_button.text() == "Cancel":
+        if self._downloading:
             self._cancel.set()
+            self.message.setText("Cancelling...")
+            self.close_button.setEnabled(False)
             return
         super().reject()

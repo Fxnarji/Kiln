@@ -25,14 +25,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
+    # A newer push makes a build still in progress pointless, so it is
+    # cancelled. Publishing is left to finish (see below).
+    concurrency:
+      group: build-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +80,11 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+    # Never cancelled once started: stopped between deleting the old release
+    # and uploading the new one, it would leave no release at all.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
 
     env:
       GH_TOKEN: ${{ github.token }}
@@ -95,8 +101,20 @@ jobs:
       # uploading over the old release would leave every past build's files
       # piling up on it. For the few seconds in between, an update check finds
       # nothing and says it could not check, which is harmless.
+      #
+      # Never replaced by an older build, as re-running an old run would do:
+      # it would take the newest build away from everyone who has not yet
+      # updated to it.
       - name: Replace the rolling release
         run: |
+          this=$(jq -r .build dist/Kiln-windows.json)
+          if gh release download "$TAG" --pattern Kiln-windows.json --output published.json 2>/dev/null; then
+            published=$(jq -r .build published.json)
+            if [ "$published" -gt "$this" ]; then
+              echo "::notice::$TAG already has build $published; not replacing it with build $this"
+              exit 0
+            fi
+          fi
           gh release delete "$TAG" --cleanup-tag --yes || true
           gh release create "$TAG" dist/* \
             --target "$GITHUB_SHA" \

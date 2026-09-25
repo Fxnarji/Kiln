@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
-from kiln import build_info
+from kiln import build_info, installer
 from kiln.core.repository import Repository
 from kiln.core.settings import load_last_project, log_file_path, save_last_project
 from kiln.errors import KilnError
@@ -93,6 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     chosen = choose_repository(argv)
     if chosen is None:
         return 0
+    # Resolved before leaving the working directory it may be relative to.
+    chosen = chosen.resolve()
+    installer.leave_installation_folder()
 
     if find_repository_root(chosen) is None:
         QMessageBox.critical(

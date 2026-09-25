@@ -17,6 +17,7 @@ against: MergeController (merging and conflicts) and FileActionsController
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Callable
 
@@ -55,6 +56,8 @@ from kiln.ui.thumbnails import ThumbnailCache
 from kiln.ui.update_dialog import Background, UpdateDialog
 from kiln.ui.views import VIEW_WINDOWS, ViewWindow
 from kiln.ui.worker import JobRunner
+
+log = logging.getLogger(__name__)
 
 LOCK_REFRESH_INTERVAL_MS = 60_000
 
@@ -707,7 +710,7 @@ class MainWindow(QMainWindow):
 
         task = Background(self)
         task.succeeded.connect(self._show_update_available)
-        task.failed.connect(lambda error: None)
+        task.failed.connect(lambda error: log.warning("update check failed: %s", error))
         task.run(lambda: update.find_update(current))
 
     def _show_update_available(self, release: update.Release | None) -> None:

@@ -41,6 +41,14 @@ class FakeGitHub:
         return io.BytesIO(self.files[url])
 
 
+@pytest.fixture(autouse=True)
+def config_directory(tmp_path, monkeypatch) -> Path:
+    """Keep update.log and friends out of the real %APPDATA% or ~/.config."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    return tmp_path / "appdata" / "Kiln"
+
+
 @pytest.fixture
 def github() -> FakeGitHub:
     return FakeGitHub()
@@ -208,6 +216,21 @@ class TestInstallation:
         assert installation.root == exe.resolve()
         assert installation.artifact_kind == "portable"
 
+    def test_portable_exe_above_temp_is_not_a_folder_build(self, tmp_path):
+        """%TEMP% lives under the home folder, and people keep exes there."""
+        home = tmp_path / "Users" / "ana"
+        exe = home / "Kiln-0.1.0-b41-windows.exe"
+
+        installation = installer.detect(exe, home / "AppData" / "Local" / "Temp" / "_MEI4")
+
+        assert installation.kind == installer.PORTABLE
+        assert installation.root == exe.resolve()
+
+    def test_folder_build_from_older_pyinstaller_is_recognised(self, tmp_path):
+        exe = tmp_path / "Kiln" / "Kiln.exe"
+
+        assert installer.detect(exe, tmp_path / "Kiln").kind == installer.FOLDER
+
     def test_running_from_source_cannot_update(self):
         assert installer.current_installation() is None
         assert installer.unavailable_reason(None)
@@ -254,11 +277,44 @@ class TestInstallation:
             installation, tmp_path / "staged", 1234, {"PATH": "x"}
         )
         used = set(re.findall(r"%(KILN_\w+)%", installer.HELPER_SCRIPT))
+        used |= set(re.findall(r"%(KILN_\w+)%", installer.HELPER_COMMAND))
 
-        assert used and used <= environment.keys()
+        # KILN_SCRIPT is added by launch_replacement, which knows the path.
+        assert used and used <= environment.keys() | {"KILN_SCRIPT"}
         assert environment["KILN_LAUNCH"] == str(tmp_path / "Kiln" / "Kiln.exe")
+        assert environment["KILN_RELAUNCH"] == str(installation.executable)
+        assert environment["KILN_STRANDED"] == str(
+            installation.backup_directory / installation.executable.name
+        )
         assert environment["KILN_WAIT_PID"] == "1234"
+        assert environment["KILN_LOG"].startswith(str(tmp_path))
         installer.HELPER_SCRIPT.encode("ascii")
+
+    def test_helper_never_puts_a_path_where_cmd_would_parse_it(self):
+        """A path with "&" in it must only ever be expanded inside quotes.
+
+        :log echoes its message unquoted, so no message may carry a path, and
+        the script's own path reaches cmd through the environment, quoted.
+        """
+        messages = re.findall(r'call :log "([^"]*)"', installer.HELPER_SCRIPT)
+        assert messages
+        for message in messages:
+            assert re.findall(r"%(\w+)%", message) in ([], ["KILN_WAIT_PID"])
+        assert installer.HELPER_COMMAND == 'cmd.exe /d /s /c ""%KILN_SCRIPT%""'
+
+    def test_kiln_leaves_its_folder_so_it_can_be_renamed(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        home.mkdir()
+        install = tmp_path / "Kiln"
+        install.mkdir()
+        monkeypatch.setattr(installer.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(installer.sys, "executable", str(install / "Kiln.exe"))
+        monkeypatch.setattr(installer.Path, "home", classmethod(lambda cls: home))
+        monkeypatch.chdir(install)
+
+        installer.leave_installation_folder()
+
+        assert Path.cwd().resolve() == home.resolve()
 
     def test_helper_does_not_inherit_the_old_bundle(self, tmp_path):
         installation = installer.detect(tmp_path / "Kiln.exe", tmp_path / "Temp" / "_MEI1")

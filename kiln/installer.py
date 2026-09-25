@@ -49,39 +49,69 @@ PYINSTALLER_VARIABLE_PREFIXES = ("_PYI_", "_MEIPASS")
 # Paths reach the script through environment variables, never through its
 # text: cmd parses its own script, and a folder called "R&D" or "100%" would
 # otherwise be parsed with it.
+#
+# Log messages never include a path: :log echoes its argument unquoted.
+#
+# Every move is retried, because antivirus and the search indexer hold freshly
+# written files open for a few seconds. Whatever happens, the script starts the
+# Kiln that ends up in place (LAUNCH), unless Kiln never exited, in which case
+# it is still running and nothing is touched.
 HELPER_SCRIPT = r"""@echo off
 setlocal EnableExtensions DisableDelayedExpansion
+set "LAUNCH=%KILN_RELAUNCH%"
 call :log "waiting for Kiln (process %KILN_WAIT_PID%) to exit"
 
-set /a WAITED=0
+set /a TRIES=0
 :wait
 tasklist /FI "PID eq %KILN_WAIT_PID%" /NH 2>nul | find "%KILN_WAIT_PID%" >nul
 if errorlevel 1 goto exited
-set /a WAITED+=1
-if %WAITED% geq 120 (call :log "Kiln did not exit; not updating" & goto finish)
-ping -n 2 127.0.0.1 >nul
+set /a TRIES+=1
+if %TRIES% geq 120 (call :log "Kiln did not exit; not updating" & goto abandon)
+call :pause
 goto wait
 
 :exited
 if "%KILN_KIND%"=="portable" goto portable
 
 if exist "%KILN_BACKUP%" rmdir /s /q "%KILN_BACKUP%"
+if exist "%KILN_BACKUP%" (call :log "an earlier backup could not be removed; not updating" & goto finish)
+
 set /a TRIES=0
 :move_old
 move "%KILN_TARGET%" "%KILN_BACKUP%" >nul 2>&1
 if not errorlevel 1 goto move_new
 set /a TRIES+=1
 if %TRIES% geq 30 (call :log "could not move the old version aside; it is still in place" & goto finish)
-ping -n 2 127.0.0.1 >nul
+call :pause
 goto move_old
 
 :move_new
+set /a TRIES=0
+:move_new_again
 move "%KILN_STAGED%" "%KILN_TARGET%" >nul 2>&1
-if errorlevel 1 (
-    call :log "could not move the new version into place; restoring the old one"
-    move "%KILN_BACKUP%" "%KILN_TARGET%" >nul 2>&1
-    goto finish
-)
+if not errorlevel 1 goto swapped
+set /a TRIES+=1
+if %TRIES% geq 30 (call :log "could not move the new version into place; restoring the old one" & goto restore)
+call :pause
+goto move_new_again
+
+:restore
+set /a TRIES=0
+:restore_again
+move "%KILN_BACKUP%" "%KILN_TARGET%" >nul 2>&1
+if not errorlevel 1 (call :log "the old version is back in place" & goto finish)
+set /a TRIES+=1
+if %TRIES% geq 30 goto stranded
+call :pause
+goto restore_again
+
+:stranded
+call :log "could not restore the old version; it is in the -previous folder beside it"
+set "LAUNCH=%KILN_STRANDED%"
+goto finish
+
+:swapped
+set "LAUNCH=%KILN_LAUNCH%"
 rmdir /s /q "%KILN_BACKUP%" 2>nul
 call :log "updated"
 goto finish
@@ -93,19 +123,32 @@ move /y "%KILN_STAGED%" "%KILN_TARGET%" >nul 2>&1
 if not errorlevel 1 (call :log "updated" & goto finish)
 set /a TRIES+=1
 if %TRIES% geq 30 (call :log "could not replace the exe; the old version is still in place" & goto finish)
-ping -n 2 127.0.0.1 >nul
+call :pause
 goto replace_exe
 
 :finish
 rmdir /s /q "%KILN_STAGING%" 2>nul
 call :log "starting Kiln"
-start "" "%KILN_LAUNCH%"
+start "" "%LAUNCH%"
 (goto) 2>nul & del "%~f0"
+
+:abandon
+rmdir /s /q "%KILN_STAGING%" 2>nul
+(goto) 2>nul & del "%~f0"
+
+:pause
+ping -n 2 127.0.0.1 >nul
+exit /b 0
 
 :log
 >>"%KILN_LOG%" echo %DATE% %TIME% %~1
 exit /b 0
 """
+
+# How cmd is asked to run the script. The script's own path goes through the
+# environment too, since %TEMP% can contain "&" just as well; with /s, cmd
+# drops only the outermost quotes and keeps the path quoted after expansion.
+HELPER_COMMAND = 'cmd.exe /d /s /c ""%KILN_SCRIPT%""'
 
 
 class InstallError(Exception):
@@ -142,13 +185,16 @@ class Installation:
 def detect(executable: Path, bundle_directory: Path) -> Installation:
     """Tell a one-folder build from a portable one.
 
-    A one-folder build unpacks into _internal beside its exe; a portable one
-    unpacks into a fresh temporary folder on every start.
+    A one-folder build unpacks into _internal beside its exe (or, built with
+    older PyInstaller, into the exe's own folder); a portable one unpacks into
+    a fresh temporary folder on every start. Only those two exact places
+    count: a portable exe kept somewhere above %TEMP%, such as the user's home
+    folder, must not pass for a one-folder build of that whole folder.
     """
     executable = executable.resolve()
     bundle_directory = bundle_directory.resolve()
     home = executable.parent
-    if bundle_directory == home or home in bundle_directory.parents:
+    if bundle_directory in (home, home / "_internal"):
         return Installation(FOLDER, executable)
     return Installation(PORTABLE, executable)
 
@@ -177,6 +223,29 @@ def unavailable_reason(installation: Installation | None) -> str:
             "Kiln to a folder you can write to."
         )
     return ""
+
+
+def leave_installation_folder() -> None:
+    """Stop holding the installation folder open as the working directory.
+
+    Started from Explorer or a shortcut, Kiln's working directory is its own
+    folder, and every program it opens (Blender, the file browser) inherits
+    it. Windows will not rename a folder that is any running program's working
+    directory, so while one of them stayed open the one-folder update could
+    never move the old build aside.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    home = Path(sys.executable).resolve().parent
+    try:
+        working = Path.cwd().resolve()
+    except OSError:
+        return
+    if working == home or home in working.parents:
+        try:
+            os.chdir(Path.home())
+        except OSError:
+            pass
 
 
 def clear_staging(installation: Installation) -> None:
@@ -215,9 +284,14 @@ def helper_environment(
     }
     environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
 
-    launch = installation.root
     if installation.kind == FOLDER:
+        # The new build's launcher is always Kiln.exe; the old one keeps
+        # whatever name it had, in place or stranded in the backup.
         launch = installation.root / EXECUTABLE_NAME
+        relaunch = installation.executable
+        stranded = installation.backup_directory / installation.executable.name
+    else:
+        launch = relaunch = stranded = installation.root
 
     environment.update(
         KILN_KIND=installation.kind,
@@ -227,6 +301,8 @@ def helper_environment(
         KILN_BACKUP=str(installation.backup_directory),
         KILN_STAGING=str(installation.staging_directory),
         KILN_LAUNCH=str(launch),
+        KILN_RELAUNCH=str(relaunch),
+        KILN_STRANDED=str(stranded),
         KILN_LOG=str(config_directory() / "update.log"),
     )
     return environment
@@ -243,12 +319,14 @@ def launch_replacement(installation: Installation, staged: Path) -> None:
     wait_pid = os.getppid() if installation.kind == PORTABLE else os.getpid()
 
     script = Path(tempfile.gettempdir()) / f"kiln-update-{os.getpid()}.cmd"
+    environment = helper_environment(installation, staged, wait_pid, dict(os.environ))
+    environment["KILN_SCRIPT"] = str(script)
     try:
         script.write_text(HELPER_SCRIPT.replace("\n", "\r\n"), encoding="ascii", newline="")
         subprocess.Popen(
-            ["cmd.exe", "/d", "/c", str(script)],
+            HELPER_COMMAND,  # a string, so Python adds no quoting of its own
             cwd=tempfile.gettempdir(),
-            env=helper_environment(installation, staged, wait_pid, dict(os.environ)),
+            env=environment,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
