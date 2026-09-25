@@ -84,8 +84,8 @@ and `Kiln-windows.json` manifest. Pull request builds are not published.
 
 A build from CI knows its channel and run number (`kiln/build_info.py`). At
 startup it fetches its channel's manifest and, if the build there is newer,
-shows **Update available** in the toolbar. **Project > Check for updates...**
-does the same on demand. Updating downloads the matching file, checks its
+the **Check for updates** button at the right end of the toolbar turns into
+**Update available**. Clicking it either way opens the update dialog. Updating downloads the matching file, checks its
 SHA-256 against the manifest, unpacks it beside the installation, and quits;
 a small batch script then swaps the new build in and starts it
 (`kiln/update.py`, `kiln/installer.py`). If the swap fails, the old version is

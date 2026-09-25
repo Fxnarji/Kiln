@@ -102,4 +102,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --prerelease \
             --title "Kiln ${{ github.ref_name }} build ${{ github.run_number }}" \
-            --notes "Latest build of \`${{ github.ref_name }}\`, from ${GITHUB_SHA::7}. Kiln updates itself from here: use Check for updates in the Project menu."
+            --notes "Latest build of \`${{ github.ref_name }}\`, from ${GITHUB_SHA::7}. Kiln updates itself from here: use Check for updates at the right end of the toolbar."

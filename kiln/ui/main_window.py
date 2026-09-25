@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QToolButton,
     QVBoxLayout,
@@ -56,6 +57,8 @@ from kiln.ui.views import VIEW_WINDOWS, ViewWindow
 from kiln.ui.worker import JobRunner
 
 LOCK_REFRESH_INTERVAL_MS = 60_000
+
+CHECK_FOR_UPDATES = "Check for updates"
 
 NOTHING_SELECTED = "No file selected"
 
@@ -176,10 +179,16 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addWidget(self._build_project_button())
 
-        # Only shown once the startup check finds a newer build.
-        self.update_action = QAction("Update available", self)
+        # Updating is about Kiln itself, not the project, so it sits apart at
+        # the far end of the row. It renames itself when the startup check
+        # finds a newer build, which is the only notice an update gets.
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        toolbar.addWidget(spacer)
+
+        self.update_action = QAction(CHECK_FOR_UPDATES, self)
+        self.update_action.setToolTip(build_info.load().label)
         self.update_action.triggered.connect(self._show_update_dialog)
-        self.update_action.setVisible(False)
         toolbar.addAction(self.update_action)
 
     def _build_project_button(self) -> QToolButton:
@@ -204,13 +213,6 @@ class MainWindow(QMainWindow):
         settings_action = QAction("Settings...", self)
         settings_action.triggered.connect(self._show_project_settings)
         menu.addAction(settings_action)
-
-        menu.addSeparator()
-
-        update_action = QAction("Check for updates...", self)
-        update_action.setToolTip(build_info.load().label)
-        update_action.triggered.connect(self._show_update_dialog)
-        menu.addAction(update_action)
 
         button = QToolButton(self)
         button.setText("Project")
@@ -711,9 +713,16 @@ class MainWindow(QMainWindow):
     def _show_update_available(self, release: update.Release | None) -> None:
         MainWindow._available_update = release
         for window in MainWindow._windows:
-            window.update_action.setVisible(release is not None)
-            if release is not None:
-                window.update_action.setToolTip(f"Build {release.build.build} is available")
+            action = window.update_action
+            font = action.font()
+            font.setBold(release is not None)
+            action.setFont(font)
+            if release is None:
+                action.setText(CHECK_FOR_UPDATES)
+                action.setToolTip(build_info.load().label)
+            else:
+                action.setText("Update available")
+                action.setToolTip(f"Build {release.build.build} is available")
 
     def _show_update_dialog(self) -> None:
         UpdateDialog(
