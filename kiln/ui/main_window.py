@@ -10,6 +10,13 @@ reading anything below:
 Nothing incrementally patches the display, so the window cannot drift out of
 step with the disk.
 
+The lock server is the exception to "one queue": asking it who holds what is a
+network round trip, and with it in the same queue every refresh, and every
+history read behind it, waited on the network. It runs on a second worker of
+its own (lock_jobs), and its answer is laid over the latest local snapshot
+when it arrives. Listing locks only reads, so it cannot collide with the git
+work in the main queue; taking and releasing locks stay in the main queue.
+
 Two larger concerns live in their own modules and are given the window to work
 against: MergeController (merging and conflicts) and FileActionsController
 (adding, deleting, and the undo bar).
@@ -21,7 +28,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import QCoreApplication, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -38,7 +45,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from kiln.core.models import Pin, RepoState, describe_size
+from kiln.core.models import LockReport, Pin, RepoState, describe_size
 from kiln.core.repository import Repository
 from kiln import build_info, update
 from kiln.core.settings import save_last_project
@@ -48,6 +55,7 @@ from kiln.ui import dialogs, sidebar as sidebar_module
 from kiln.ui.detail_panel import DetailPanel
 from kiln.ui.file_actions import FileActionsController
 from kiln.ui.file_table import FileTable
+from kiln.ui.history import HistoryLoader
 from kiln.ui.merge_controller import MergeController
 from kiln.ui.pin_dialog import PinDialog
 from kiln.ui.settings_dialog import ProjectSettingsDialog
@@ -91,7 +99,19 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.repository = repository
         self.jobs = JobRunner(self)
+        self.lock_jobs = JobRunner(self)
+        self.history = HistoryLoader(self.jobs, repository)
         self.state: RepoState | None = None
+        # The two halves self.state is made of, each replaced as it arrives.
+        self._local_state: RepoState | None = None
+        self._lock_report: LockReport | None = None
+        # A refresh already queued but not yet started will read the disk
+        # after anything that asks now, so asking again adds nothing.
+        self._local_refresh_queued = False
+        self._lock_refresh_queued = False
+        # Which file the history panel is for. Read on the worker thread to
+        # skip reads nobody wants any more, so it is only ever a plain string.
+        self._history_path = ""
         self._view = ("folder", "")
         self._folders: list[str] = []
         # Changes and Locks open beside this window rather than replacing the
@@ -116,6 +136,12 @@ class MainWindow(QMainWindow):
         self._lock_timer.timeout.connect(lambda: self.refresh(with_locks=True))
         self._lock_timer.start(LOCK_REFRESH_INTERVAL_MS)
 
+        # Coming back to Kiln, typically from saving in Blender, is exactly
+        # when the files on disk have changed.
+        QCoreApplication.instance().applicationStateChanged.connect(
+            self._application_state_changed
+        )
+
         self.refresh(with_locks=True)
         self._check_for_update_quietly()
 
@@ -128,13 +154,16 @@ class MainWindow(QMainWindow):
         on_done: Callable[[Any], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
         error_context: str = "",
+        with_locks: bool = False,
     ) -> None:
         """Run one git operation on the worker thread.
 
         This is the single entry point for everything that touches the
         repository, and it supplies the two behaviours nearly every caller
         wants: refresh the snapshot afterwards, and report failures in a dialog
-        with a Copy diagnostics button.
+        with a Copy diagnostics button. Pass with_locks for an operation that
+        can change who holds what (locking, releasing, pushing), so the
+        refresh asks the server too.
 
         Pass on_done only when the result matters. Doing so **replaces** the
         automatic refresh rather than adding to it, so a callback that wants
@@ -146,7 +175,7 @@ class MainWindow(QMainWindow):
             if on_done is not None:
                 on_done(result)
             else:
-                self.refresh(with_locks=True)
+                self.refresh(with_locks=with_locks)
 
         def failed(error: Exception) -> None:
             dialogs.show_error(self, error, error_context or label)
@@ -319,20 +348,66 @@ class MainWindow(QMainWindow):
     # -- refresh cycle ------------------------------------------------------
 
     def refresh(self, with_locks: bool = False) -> None:
+        """Re-read the working tree, and with_locks, ask the lock server too.
+
+        The two are independent: local changes show as soon as git has
+        answered, and locks follow whenever the server does.
+        """
+        if with_locks:
+            self.refresh_locks()
+        if self._local_refresh_queued:
+            return
+        self._local_refresh_queued = True
+
+        def read():
+            self._local_refresh_queued = False
+            return self.repository.local_snapshot()
+
         self.jobs.submit(
             "refreshing",
-            lambda: self.repository.snapshot(include_locks=with_locks),
-            on_done=self._apply_state,
+            read,
+            on_done=self._local_state_arrived,
             on_error=lambda error: dialogs.show_error(self, error, "Refresh failed"),
         )
 
+    def refresh_locks(self) -> None:
+        if self._lock_refresh_queued:
+            return
+        self._lock_refresh_queued = True
+
+        def read():
+            self._lock_refresh_queued = False
+            return self.repository.lock_report()
+
+        self.lock_jobs.submit(
+            "checking locks",
+            read,
+            on_done=self._lock_report_arrived,
+            on_error=lambda error: log.warning("checking locks failed: %s", error),
+        )
+
+    def _local_state_arrived(self, state: RepoState) -> None:
+        self._local_state = state
+        self._show_combined_state()
+
+    def _lock_report_arrived(self, report: LockReport) -> None:
+        self._lock_report = report
+        if self._local_state is not None:
+            self._show_combined_state()
+
+    def _show_combined_state(self) -> None:
+        state = self._local_state
+        if self._lock_report is not None:
+            state = state.with_locks(self._lock_report)
+        self._apply_state(state)
+
+    def _application_state_changed(self, application_state) -> None:
+        if application_state == Qt.ApplicationActive and self.isVisible():
+            self.refresh()
+
     def _apply_state(self, state: RepoState) -> None:
         self.state = state
-
-        # Walking the tree for the folder list runs a git command and an rglob,
-        # and this runs on the UI thread. Do it once per refresh and reuse the
-        # result for both the sidebar and the folder view.
-        self._folders = self.repository.folders()
+        self._folders = state.folders
 
         self.sidebar.refresh(state, self.repository.pins(), self._folders)
         self._update_banner(state)
@@ -376,9 +451,9 @@ class MainWindow(QMainWindow):
         self.branch_label.setText(f"  {state.branch or '(no branch)'}  ")
         self.sync_label.setText(f"  {state.behind} in · {state.ahead} out  ")
         freshness = state.lock_freshness_description()
-        self.locks_label.setText(
-            f"  {freshness}{'  (stale)' if state.locks_are_stale() else ''}  "
-        )
+        # Not yet asked is not stale: the first answer is on its way.
+        stale = state.locks_fetched_at is not None and state.locks_are_stale()
+        self.locks_label.setText(f"  {freshness}{'  (stale)' if stale else ''}  ")
 
     # -- views --------------------------------------------------------------
 
@@ -460,11 +535,14 @@ class MainWindow(QMainWindow):
         self.detail.show_file(entry, self.state)
         self.selection_label.setText(self.describe_selection(entry))
 
+        self._history_path = entry.path if entry is not None else ""
         if entry is not None:
-            self.jobs.submit(
-                "reading history",
-                lambda: self.repository.commits(limit=20, path=entry.path),
-                on_done=lambda commits: self._show_history_for(entry.path, commits),
+            wanted_path = entry.path
+            self.history.request(
+                wanted_path,
+                self.state.head,
+                lambda: self._history_path == wanted_path,
+                lambda commits: self._show_history_for(wanted_path, commits),
             )
 
     def _show_history_for(self, path: str, commits) -> None:
@@ -541,6 +619,7 @@ class MainWindow(QMainWindow):
             f"locking {Path(path).name}",
             lambda: self.repository.prepare_for_editing(path),
             on_error=lambda error: self._handle_open_failure(path, error),
+            with_locks=True,
         )
 
     def release_locks(
@@ -560,6 +639,7 @@ class MainWindow(QMainWindow):
             on_error=lambda error: dialogs.show_error(
                 dialog_parent or self, error, "Could not release the lock"
             ),
+            with_locks=True,
         )
 
     def discard(
@@ -619,7 +699,7 @@ class MainWindow(QMainWindow):
         def done(_result) -> None:
             if on_success is not None:
                 on_success()
-            self.refresh(with_locks=True)
+            self.refresh(with_locks=and_push)
 
         self.run_job(
             "committing and pushing" if and_push else "committing",
@@ -637,7 +717,9 @@ class MainWindow(QMainWindow):
         )
 
     def _push(self) -> None:
-        self.run_job("pushing", self.repository.push, error_context="Push failed")
+        self.run_job(
+            "pushing", self.repository.push, error_context="Push failed", with_locks=True
+        )
 
     # -- pins ---------------------------------------------------------------
 
@@ -752,6 +834,7 @@ class MainWindow(QMainWindow):
         for window in list(self._view_windows.values()):
             window.close()
         self.jobs.shutdown()
+        self.lock_jobs.shutdown()
         if self in MainWindow._windows:
             MainWindow._windows.remove(self)
         super().closeEvent(event)

@@ -48,6 +48,8 @@ class ViewWindow(QMainWindow):
         super().__init__(window, Qt.Window)
         self.window = window
         self.menu = self.build_menu()
+        # See MainWindow._history_path: a plain string the worker can read.
+        self._history_path = ""
 
         self.setWindowTitle(f"{self.title} — {window.repository.root.name}")
         self.resize(*self.window_size)
@@ -169,21 +171,22 @@ class ViewWindow(QMainWindow):
     def show_history_in(self, panel, entry: FileEntry | None) -> None:
         """Fill a panel's history, for the screens that have one.
 
-        Arrow-keying down the list queues one read per file, and they come back
-        in order but later than the selection moved, so the answer is dropped
-        unless it is still the file being looked at.
+        Arrow-keying down the list asks for one file after another, so an
+        answer is only shown if it is still the file being looked at.
         """
-        if entry is None:
+        self._history_path = entry.path if entry is not None else ""
+        state = self.window.state
+        if entry is None or state is None:
             return
 
+        wanted_path = entry.path
+
         def arrived(commits) -> None:
-            if self.list.selected_paths() == [entry.path]:
+            if self.list.selected_paths() == [wanted_path]:
                 panel.show_history(commits)
 
-        self.window.jobs.submit(
-            "reading history",
-            lambda: self.window.repository.commits(limit=20, path=entry.path),
-            on_done=arrived,
+        self.window.history.request(
+            wanted_path, state.head, lambda: self._history_path == wanted_path, arrived
         )
 
     # -- lifetime -----------------------------------------------------------

@@ -211,7 +211,7 @@ class FileActionsController(QObject):
             f"Moved {deleted.repo_relative_path} to Kiln trash"
         )
         self._undo_timer.start(UNDO_WINDOW_MS)
-        self.window.refresh(with_locks=True)
+        self.window.refresh()
 
     def undo_delete(self) -> None:
         deleted = self._deleted_item

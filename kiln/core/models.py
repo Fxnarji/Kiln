@@ -2,12 +2,16 @@
 
 Everything is frozen. A refresh builds a whole new RepoState rather than
 mutating the old one, so the UI can never drift out of step with the disk.
-At this repository size a full rebuild costs nothing.
+
+Locks come from the server, which is slow and sometimes unreachable, so they
+are fetched on their own schedule as a LockReport and laid over the local
+snapshot with RepoState.with_locks rather than holding up every refresh.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import cached_property
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 
@@ -72,6 +76,16 @@ class FileEntry:
 
 
 @dataclass(frozen=True)
+class LockReport:
+    """What the lock server said, and when. `available` False means it could
+    not be asked, which is not the same as nobody holding anything."""
+
+    locks: dict[str, Lock] = field(default_factory=dict)
+    available: bool = True
+    fetched_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class RepoState:
     """An immutable snapshot of everything the UI displays."""
 
@@ -87,6 +101,8 @@ class RepoState:
     blocked_reason: str = ""  # non-empty means writes are disabled (spec 10.5)
     merge_in_progress: bool = False
     files: list[FileEntry] = field(default_factory=list)
+    # Every folder in the working tree, including empty ones.
+    folders: list[str] = field(default_factory=list)
 
     # -- derived views ------------------------------------------------------
 
@@ -112,10 +128,27 @@ class RepoState:
         return [entry for entry in self.files if not entry.downloaded]
 
     def find(self, path: str) -> FileEntry | None:
-        for entry in self.files:
-            if entry.path == path:
-                return entry
-        return None
+        return self._by_path.get(path)
+
+    @cached_property
+    def _by_path(self) -> dict[str, FileEntry]:
+        return {entry.path: entry for entry in self.files}
+
+    def with_locks(self, report: LockReport) -> "RepoState":
+        """This snapshot with the server's locks laid over it."""
+        files = [
+            entry
+            if entry.lock is None and entry.path not in report.locks
+            else replace(entry, lock=report.locks.get(entry.path))
+            for entry in self.files
+        ]
+        return replace(
+            self,
+            files=files,
+            online=report.available,
+            locks_available=report.available,
+            locks_fetched_at=report.fetched_at if report.available else None,
+        )
 
     def locks_are_stale(self, now: datetime | None = None) -> bool:
         if not self.locks_available or self.locks_fetched_at is None:
@@ -127,7 +160,7 @@ class RepoState:
         if not self.locks_available:
             return "lock state unavailable"
         if self.locks_fetched_at is None:
-            return "locks not loaded"
+            return "checking locks..."
         reference = now or datetime.now(timezone.utc)
         return f"locks as of {describe_age(reference - self.locks_fetched_at)}"
 

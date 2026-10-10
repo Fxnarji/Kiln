@@ -11,13 +11,16 @@ from a terminal and tested headless.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import stat
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kiln.core import conflicts, editing, permissions, pins, trash
-from kiln.core.models import FileEntry, Lock, Pin, RepoState
-from kiln.core.pointers import is_downloaded
+from kiln.core import conflicts, editing, pins, trash
+from kiln.core.models import FileEntry, Lock, LockReport, Pin, RepoState
+from kiln.core.pointers import MAX_POINTER_SIZE_BYTES, POINTER_PREFIX
 from kiln.errors import (
     GitCommandError,
     LocksUnavailableError,
@@ -29,6 +32,9 @@ from kiln.git.runner import GitRunner, find_repository_root
 
 log = logging.getLogger(__name__)
 
+# Never walked into when listing folders, and never shown.
+HIDDEN_FOLDERS = frozenset({".git", ".kiln"})
+
 
 class Repository:
     """One open repository."""
@@ -37,6 +43,7 @@ class Repository:
         self.root = Path(root).resolve()
         self.runner = GitRunner(self.root)
         self._locking_supported: bool | None = None
+        self._git_directory: Path | None = None
         trash.ensure_ignored(self.root)
 
     @classmethod
@@ -50,24 +57,22 @@ class Repository:
     # -- reading ------------------------------------------------------------
 
     def snapshot(self, include_locks: bool = True) -> RepoState:
-        """Build a complete picture of the repository right now."""
-        report = status.parse_status(self.runner.run(*status.status_argv()).stdout)
+        """Build a complete picture of the repository right now.
 
-        lock_by_path: dict[str, Lock] = {}
-        locks_available = True
-        locks_fetched_at: datetime | None = None
-        if include_locks:
-            lock_by_path, locks_available = self._load_locks()
-            if locks_available:
-                locks_fetched_at = datetime.now(timezone.utc)
+        With include_locks, this asks the lock server too, which is a network
+        round trip. The UI asks for the two separately (local_snapshot and
+        lock_report) so a slow server never holds up showing local changes.
+        """
+        state = self.local_snapshot()
+        return state.with_locks(self.lock_report()) if include_locks else state
+
+    def local_snapshot(self) -> RepoState:
+        """Everything about the repository that can be read without the server."""
+        report = status.parse_status(self.runner.run(*status.status_argv()).stdout)
+        tracked = workdir.tracked_files(self.runner)
 
         status_by_path = {entry.path: entry.status for entry in report.entries}
-        every_path = sorted(set(workdir.tracked_files(self.runner)) | set(status_by_path))
-
-        files = [
-            self._build_entry(path, status_by_path.get(path, "clean"), lock_by_path)
-            for path in every_path
-        ]
+        every_path = sorted(set(tracked) | set(status_by_path))
 
         return RepoState(
             root=str(self.root),
@@ -76,12 +81,22 @@ class Repository:
             upstream=report.upstream,
             ahead=report.ahead,
             behind=report.behind,
-            online=locks_available if include_locks else True,
-            locks_available=locks_available,
-            locks_fetched_at=locks_fetched_at,
             blocked_reason=self._blocked_reason(report),
-            merge_in_progress=merge.merge_in_progress(self.runner),
-            files=files,
+            merge_in_progress=(self._git_dir() / "MERGE_HEAD").exists(),
+            files=[
+                self._build_entry(path, status_by_path.get(path, "clean"))
+                for path in every_path
+            ],
+            folders=self._folders(tracked),
+        )
+
+    def lock_report(self) -> LockReport:
+        """Ask the server who holds what. Slow: a network round trip."""
+        found, available = self._load_locks()
+        return LockReport(
+            locks=found,
+            available=available,
+            fetched_at=datetime.now(timezone.utc) if available else None,
         )
 
     def commits(self, limit: int = 50, path: str | None = None):
@@ -89,18 +104,32 @@ class Repository:
 
     def folders(self) -> list[str]:
         """Every visible folder in the working tree, including empty folders."""
+        return self._folders(workdir.tracked_files(self.runner))
+
+    def _folders(self, tracked: list[str]) -> list[str]:
         found: set[str] = set()
-        for path in workdir.tracked_files(self.runner):
+        for path in tracked:
             parts = path.split("/")[:-1]
             for depth in range(1, len(parts) + 1):
                 found.add("/".join(parts[:depth]))
-        for directory in self.root.rglob("*"):
-            if not directory.is_dir():
+
+        # Empty and untracked folders only show up on disk. .git and .kiln are
+        # never walked into: an LFS object store or a full trash holds far
+        # more entries than the project itself.
+        root = str(self.root)
+        pending = [root]
+        while pending:
+            try:
+                with os.scandir(pending.pop()) as entries:
+                    for entry in entries:
+                        if entry.name in HIDDEN_FOLDERS or not entry.is_dir(
+                            follow_symlinks=False
+                        ):
+                            continue
+                        pending.append(entry.path)
+                        found.add(os.path.relpath(entry.path, root).replace(os.sep, "/"))
+            except OSError:
                 continue
-            relative = directory.relative_to(self.root)
-            if any(part in {".git", ".kiln"} for part in relative.parts):
-                continue
-            found.add(relative.as_posix())
         return sorted(found)
 
     # -- pins ---------------------------------------------------------------
@@ -351,19 +380,35 @@ class Repository:
             for lock in found
         }, True
 
-    def _build_entry(
-        self, path: str, file_status: str, lock_by_path: dict[str, Lock]
-    ) -> FileEntry:
-        full_path = self.root / path
-        downloaded = is_downloaded(self.root, path)
+    def _build_entry(self, path: str, file_status: str) -> FileEntry:
+        """What the disk says about one file, from a single stat.
+
+        This runs for every file on every refresh, and on Windows each file
+        system call is expensive, so everything comes from one os.stat: only
+        a file small enough to be an LFS pointer is opened as well.
+        """
+        full_path = os.path.join(self.root, path)
+        try:
+            info = os.stat(full_path)
+        except OSError:
+            return FileEntry(path=path, status=file_status, downloaded=False, writable=False)
+        if not stat.S_ISREG(info.st_mode):
+            return FileEntry(path=path, status=file_status, downloaded=False, writable=False)
+
+        downloaded = info.st_size > MAX_POINTER_SIZE_BYTES or not _starts_like_pointer(full_path)
         return FileEntry(
             path=path,
             status=file_status,
             downloaded=downloaded,
-            writable=permissions.is_writable(full_path),
-            size=workdir.file_size_on_disk(self.root, path) if downloaded else None,
-            lock=lock_by_path.get(path),
+            writable=_writable(full_path, info),
+            size=info.st_size if downloaded else None,
         )
+
+    def _git_dir(self) -> Path:
+        """The .git directory. It cannot move while Kiln has the clone open."""
+        if self._git_directory is None:
+            self._git_directory = merge.git_dir(self.runner)
+        return self._git_directory
 
     def _blocked_reason(self, report: status.StatusReport) -> str:
         """States Kiln refuses to act in (spec 10.5).
@@ -377,7 +422,7 @@ class Repository:
                 "changes from here — open a terminal and ask for help."
             )
 
-        git_directory = merge.git_dir(self.runner)
+        git_directory = self._git_dir()
         if (git_directory / "rebase-merge").exists() or (
             git_directory / "rebase-apply"
         ).exists():
@@ -397,3 +442,23 @@ class Repository:
         reason = self._blocked_reason(report)
         if reason:
             raise RepositoryBusyError(reason)
+
+
+def _starts_like_pointer(full_path: str) -> bool:
+    try:
+        with open(full_path, "rb") as handle:
+            return handle.read(len(POINTER_PREFIX)) == POINTER_PREFIX
+    except OSError:
+        return False
+
+
+def _writable(full_path: str, info: os.stat_result) -> bool:
+    """permissions.is_writable, without a second system call on Windows.
+
+    There, os.access looks at nothing but the read-only attribute, which stat
+    already reports in the write bit. On Linux it also weighs who owns the
+    file, which the mode bits alone cannot answer.
+    """
+    if sys.platform == "win32":
+        return bool(info.st_mode & stat.S_IWRITE)
+    return os.access(full_path, os.W_OK)
